@@ -9,13 +9,12 @@ import multiprocessing as mp
 
 DATA_FOLDER = "/Applications/PairsAlgo/data"
 WINDOW_HOURS = 24
-Z_SCORE_THRESHOLD = 3.0
-POSITIVE_ONLY = False
-BTC_MOVE_THRESHOLD = 0.3
+Z_SCORE_THRESHOLD = 1
+BTC_MOVE_THRESHOLD = 0.2
 ENABLE_EWMA_SMOOTHING = True
 EWMA_ALPHA = 0.000001
-TOP_N_OUTLIERS = 10
-TARGET_TIMESTAMP = "2025-08-09 09:45:00"
+REGIME_EWMA_ALPHA = 0.8
+TARGET_TIMESTAMP = "2024-09-15 19:45:00"
 LOG_LEVEL = logging.INFO
 
 
@@ -164,6 +163,349 @@ def _calculate_filtered_z_score_jit(values, btc_values, window, btc_threshold, e
         filtered_z_scores[i] = 0.0
     
     return filtered_z_scores
+
+class OutlierRegimeAlgorithm:
+    def __init__(self, data_folder: str = DATA_FOLDER, lookback_hours: int = 72, 
+                 ewma_alpha: float = None, outlier_z_threshold: float = None):
+        self.data_folder = Path(data_folder)
+        self.lookback_hours = lookback_hours
+        self.lookback_periods = lookback_hours * 12
+        self.data_cache = {}
+        self.btc_drop_threshold = -0.2
+        self.btc_bounce_threshold = 0.2
+        self.ewma_alpha = ewma_alpha if ewma_alpha is not None else REGIME_EWMA_ALPHA
+        self.outlier_z_threshold = outlier_z_threshold if outlier_z_threshold is not None else Z_SCORE_THRESHOLD
+        
+    def load_coin_data(self, coin: str) -> Optional[pd.DataFrame]:
+        if coin in self.data_cache:
+            return self.data_cache[coin]
+            
+        file_path = self.data_folder / f"{coin}_5m_ohlcv.parquet"
+        if not file_path.exists():
+            return None
+            
+        try:
+            df = pd.read_parquet(file_path, columns=['open_time', 'close'])
+            df['close'] = pd.to_numeric(df['close'], downcast='float')
+            df = df.sort_values('open_time').reset_index(drop=True)
+            self.data_cache[coin] = df
+            return df
+        except Exception:
+            return None
+    
+    def calculate_returns(self, df: pd.DataFrame) -> pd.Series:
+        return df['close'].pct_change()
+    
+    def calculate_relative_returns(self, alt_returns: pd.Series, btc_returns: pd.Series) -> pd.Series:
+        common_index = alt_returns.index.intersection(btc_returns.index)
+        if len(common_index) == 0:
+            min_len = min(len(alt_returns), len(btc_returns))
+            aligned_alt = alt_returns.iloc[:min_len]
+            aligned_btc = btc_returns.iloc[:min_len]
+        else:
+            aligned_alt = alt_returns.reindex(common_index, method='ffill')
+            aligned_btc = btc_returns.reindex(common_index, method='ffill')
+        
+        return (aligned_alt - aligned_btc).dropna()
+    
+    def calculate_z_scores(self, relative_returns: pd.Series, window: int = 288) -> pd.Series:
+        rolling_mean = relative_returns.rolling(window=window, min_periods=window//2).mean()
+        rolling_std = relative_returns.rolling(window=window, min_periods=window//2).std()
+        
+        z_scores = (relative_returns - rolling_mean) / rolling_std
+        return z_scores.fillna(0)
+    
+    def select_outliers(self, target_timestamp: str, top_n: int = 5, bottom_n: int = 5) -> Dict[str, List[str]]:
+        target_dt = pd.to_datetime(target_timestamp)
+        
+        btc_data = self.load_coin_data("BTC")
+        if btc_data is None:
+            return {'top': [], 'bottom': []}
+        
+        btc_returns = self.calculate_returns(btc_data)
+        
+        all_z_scores = []
+        
+        for coin in COINS:
+            if coin == "BTC":
+                continue
+                
+            coin_data = self.load_coin_data(coin)
+            if coin_data is None:
+                continue
+            
+            coin_returns = self.calculate_returns(coin_data)
+            relative_returns = self.calculate_relative_returns(coin_returns, btc_returns)
+            z_scores = self.calculate_z_scores(relative_returns)
+            
+            time_mask = coin_data['open_time'] <= target_dt
+            if not time_mask.any():
+                continue
+                
+            closest_idx = time_mask[::-1].idxmax()
+            if closest_idx in z_scores.index:
+                z_score = z_scores.loc[closest_idx]
+                
+                all_z_scores.append({
+                    'coin': coin,
+                    'z_score': z_score,
+                    'timestamp': coin_data.loc[closest_idx, 'open_time']
+                })
+        
+        # Sort by z-score (highest to lowest)
+        all_z_scores.sort(key=lambda x: x['z_score'], reverse=True)
+        
+        # Select ALL qualified top outliers (positive Z-scores above threshold)
+        top_outliers = []
+        for score_data in all_z_scores:
+            if score_data['z_score'] > self.outlier_z_threshold and len(top_outliers) < top_n:
+                top_outliers.append(score_data['coin'])
+        
+        # Select ALL qualified bottom outliers (negative Z-scores below threshold)
+        bottom_outliers = []
+        for score_data in reversed(all_z_scores):  # Start from lowest
+            if score_data['z_score'] < -self.outlier_z_threshold and len(bottom_outliers) < bottom_n:
+                bottom_outliers.append(score_data['coin'])
+        
+        logger.info(f"Selected {len(top_outliers)} top outliers: {top_outliers}")
+        logger.info(f"Selected {len(bottom_outliers)} bottom outliers: {bottom_outliers}")
+        
+        return {'top': top_outliers, 'bottom': bottom_outliers}
+    
+    def detect_btc_events(self, btc_returns: pd.Series, end_time: pd.Timestamp) -> Dict:
+        """Step 2: Detect BTC drops and bounces in lookback period"""
+        start_time = end_time - pd.Timedelta(hours=self.lookback_hours)
+        
+        # Filter to lookback period
+        btc_data = self.load_coin_data("BTC")
+        if btc_data is None:
+            return {'drops': [], 'bounces': []}
+        
+        time_mask = (btc_data['open_time'] >= start_time) & (btc_data['open_time'] <= end_time)
+        period_data = btc_data[time_mask].copy()
+        
+        if len(period_data) == 0:
+            return {'drops': [], 'bounces': []}
+        
+        period_returns = self.calculate_returns(period_data) * 100  # Convert to percentage
+        
+        # Identify events
+        drops = []
+        bounces = []
+        
+        for idx, return_val in period_returns.items():
+            if pd.isna(return_val):
+                continue
+                
+            timestamp = period_data.loc[idx, 'open_time']
+            
+            if return_val < self.btc_drop_threshold:
+                drops.append({
+                    'timestamp': timestamp,
+                    'btc_return': return_val / 100,  # Convert back to decimal
+                    'event_type': 'drop'
+                })
+            elif return_val > self.btc_bounce_threshold:
+                bounces.append({
+                    'timestamp': timestamp,
+                    'btc_return': return_val / 100,  # Convert back to decimal
+                    'event_type': 'bounce'
+                })
+        
+        logger.info(f"Found {len(drops)} drops and {len(bounces)} bounces in {self.lookback_hours}h")
+        return {'drops': drops, 'bounces': bounces}
+    
+    def calculate_outlier_signals(self, outliers: Dict[str, List[str]], events: Dict) -> List[float]:
+        """Step 3: Generate signals for each BTC event using both top and bottom outliers"""
+        all_events = events['drops'] + events['bounces']
+        signals = []
+        
+        for event in all_events:
+            event_timestamp = event['timestamp']
+            btc_return = event['btc_return']
+            event_type = event['event_type']
+            
+            basket_signals = []
+            
+            # Calculate signals for top outliers (recent winners)
+            for coin in outliers['top']:
+                signal = self._calculate_coin_signal(coin, event_timestamp, btc_return, event_type, 'top')
+                if signal is not None:
+                    basket_signals.append(signal)
+            
+            # Calculate signals for bottom outliers (recent losers)
+            for coin in outliers['bottom']:
+                signal = self._calculate_coin_signal(coin, event_timestamp, btc_return, event_type, 'bottom')
+                if signal is not None:
+                    basket_signals.append(signal)
+            
+            # Average signals across basket
+            if basket_signals:
+                avg_signal = np.mean(basket_signals)
+                signals.append(avg_signal)
+        
+        return signals
+    
+    def _calculate_coin_signal(self, coin: str, event_timestamp: pd.Timestamp, btc_return: float, 
+                             event_type: str, outlier_type: str) -> Optional[float]:
+        """Helper function to calculate signal for a single coin"""
+        coin_data = self.load_coin_data(coin)
+        if coin_data is None:
+            return None
+        
+        # Find closest return to event timestamp
+        time_diffs = abs(coin_data['open_time'] - event_timestamp)
+        closest_idx = time_diffs.idxmin()
+        
+        if time_diffs.loc[closest_idx] > pd.Timedelta(minutes=10):
+            return None  # Skip if too far from event
+        
+        coin_returns = self.calculate_returns(coin_data)
+        if closest_idx not in coin_returns.index or closest_idx == 0:
+            return None
+            
+        outlier_return = coin_returns.loc[closest_idx]
+        
+        if pd.isna(outlier_return) or btc_return == 0:
+            return None
+        
+        # Calculate beta (coin_return / btc_return)
+        beta = outlier_return / btc_return
+        
+        # Fixed signal calculation logic:
+        # Positive signals = momentum behavior
+        # Negative signals = mean reversion behavior
+        
+        if event_type == 'drop':
+            if outlier_type == 'top':
+                # Top outliers during drops: momentum = continues outperforming, mean reversion = converges to market
+                # If beta < 1: outperforms drop (resists) = momentum
+                # If beta > 1: drops harder = mean reversion 
+                signal = 2.0 - beta  # >0 when beta < 2, emphasizes resistance
+            else:  # bottom outliers
+                # Bottom outliers during drops: momentum = continues underperforming, mean reversion = converges
+                # If beta > 1: drops harder = momentum (continues weak)
+                # If beta < 1: resists drop = mean reversion
+                signal = beta - 1.0  # >0 when beta > 1, emphasizes weakness continuation
+        else:  # bounce
+            if outlier_type == 'top':
+                # Top outliers during bounces: momentum = continues outperforming, mean reversion = converges
+                # If beta > 1: outperforms bounce = momentum
+                # If beta < 1: underperforms = mean reversion
+                signal = beta - 1.0  # >0 when beta > 1, emphasizes outperformance
+            else:  # bottom outliers  
+                # Bottom outliers during bounces: momentum = continues underperforming, mean reversion = converges upward
+                # If beta < 1: bounces less = momentum (continues weak)
+                # If beta > 1: bounces more = mean reversion
+                signal = 1.0 - beta  # >0 when beta < 1, emphasizes continued weakness
+        
+        return signal
+    
+    def calculate_regime_score(self, signals: List[float]) -> float:
+        """Step 4: Calculate final regime score using EWMA"""
+        if not signals:
+            return 50.0  # Neutral score
+        
+        # Apply EWMA smoothing
+        if len(signals) == 1:
+            ewma_signal = signals[0]
+        else:
+            ewma_signals = pd.Series(signals).ewm(alpha=self.ewma_alpha).mean()
+            ewma_signal = ewma_signals.iloc[-1]
+        
+        # Dynamic scaling based on signal distribution
+        signal_range = max(signals) - min(signals)
+        
+        # Use adaptive scaling: wider ranges get wider scaling
+        if signal_range > 4:  # Wide signal range
+            scale_factor = 3.0
+        elif signal_range > 2:  # Medium signal range
+            scale_factor = 2.0
+        else:  # Narrow signal range
+            scale_factor = 1.5
+        
+        # Clamp with adaptive scaling
+        clamped_ewma = max(-scale_factor, min(scale_factor, ewma_signal))
+        # Normalize to [-1, 1] range
+        normalized_ewma = clamped_ewma / scale_factor
+        
+        score = 50 + (50 * normalized_ewma)
+        
+        return max(0, min(100, score))
+    
+    def run_regime_analysis(self, target_timestamp: str) -> Dict:
+        """Run complete outlier regime analysis"""
+        target_dt = pd.to_datetime(target_timestamp)
+        
+        # Step 1: Select outliers
+        outliers = self.select_outliers(target_timestamp, top_n=5, bottom_n=5)
+        total_outliers = len(outliers['top']) + len(outliers['bottom'])
+        
+        if total_outliers == 0:
+            return {
+                'timestamp': target_timestamp,
+                'regime_score': 50.0,
+                'top_outliers': [],
+                'bottom_outliers': [],
+                'events_analyzed': 0,
+                'signals': [],
+                'interpretation': 'Neutral (no outliers found)'
+            }
+        
+        # Step 2: Detect BTC events
+        events = self.detect_btc_events(
+            self.calculate_returns(self.load_coin_data("BTC")), 
+            target_dt
+        )
+        
+        total_events = len(events['drops']) + len(events['bounces'])
+        if total_events == 0:
+            return {
+                'timestamp': target_timestamp,
+                'regime_score': 50.0,
+                'top_outliers': outliers['top'],
+                'bottom_outliers': outliers['bottom'],
+                'events_analyzed': 0,
+                'signals': [],
+                'interpretation': 'Neutral (no BTC events found)'
+            }
+        
+        # Step 3: Calculate signals
+        signals = self.calculate_outlier_signals(outliers, events)
+        
+        # Step 4: Calculate regime score
+        regime_score = self.calculate_regime_score(signals)
+        
+        # Interpretation
+        if regime_score < 30:
+            interpretation = 'Mean Reversion (outliers reverse to mean)'
+        elif regime_score > 70:
+            interpretation = 'Momentum (outliers continue trending)'
+        else:
+            interpretation = 'Neutral'
+        
+        # Calculate signal breakdown for better understanding
+        positive_signals = [s for s in signals if s > 0]
+        negative_signals = [s for s in signals if s < 0]
+        avg_signal = np.mean(signals) if signals else 0
+        
+        return {
+            'timestamp': target_timestamp,
+            'regime_score': regime_score,
+            'top_outliers': outliers['top'],
+            'bottom_outliers': outliers['bottom'],
+            'events_analyzed': total_events,
+            'signals': signals,
+            'interpretation': interpretation,
+            'drops_count': len(events['drops']),
+            'bounces_count': len(events['bounces']),
+            'signal_breakdown': {
+                'positive_signals': len(positive_signals),
+                'negative_signals': len(negative_signals),
+                'avg_signal': avg_signal,
+                'momentum_direction': 'up' if avg_signal > 0 else 'down' if avg_signal < 0 else 'neutral'
+            }
+        }
 
 class PairsTradingAlgorithm:
     def __init__(self, data_folder: str = DATA_FOLDER, window_hours: int = WINDOW_HOURS):
@@ -657,8 +999,8 @@ class PairsTradingAlgorithm:
         
         results = self.process_pairs_data(target_date)
         
-        top_coins = self.get_top_coins_by_z_score(results, n=TOP_N_OUTLIERS)
-        bottom_coins = self.get_bottom_coins_by_z_score(results, n=TOP_N_OUTLIERS)
+        top_coins = self.get_top_coins_by_z_score(results, n=10)
+        bottom_coins = self.get_bottom_coins_by_z_score(results, n=10)
         
         total_outliers = sum(len(df[df['is_outlier']]) for df in results.values())
         positive_outliers = sum(len(df[df['z_score'] > Z_SCORE_THRESHOLD]) for df in results.values())
@@ -753,8 +1095,8 @@ class PairsTradingAlgorithm:
             if len(filtered_df) > 0:
                 filtered_results[coin] = filtered_df
         
-        top_coins = self.get_top_coins_by_z_score(filtered_results, n=TOP_N_OUTLIERS)
-        bottom_coins = self.get_bottom_coins_by_z_score(filtered_results, n=TOP_N_OUTLIERS)
+        top_coins = self.get_top_coins_by_z_score(filtered_results, n=10)
+        bottom_coins = self.get_bottom_coins_by_z_score(filtered_results, n=10)
         
         total_outliers = sum(len(df[df['is_outlier']]) for df in filtered_results.values())
         positive_outliers = sum(len(df[df['z_score'] > Z_SCORE_THRESHOLD]) for df in filtered_results.values())
@@ -816,9 +1158,124 @@ class PairsTradingAlgorithm:
         return coin_z_scores
 
 
+def test_full_day_regime():
+    """Test outlier regime across a full trading day"""
+    regime_algo = OutlierRegimeAlgorithm()
+    
+    print("=" * 60)
+    print("FULL DAY OUTLIER REGIME TEST")
+    print("=" * 60)
+    
+    import pandas as pd
+    base_date = TARGET_TIMESTAMP.split()[0]
+    timestamps = []
+    for hour in range(0, 24, 2):
+        timestamps.append(f"{base_date} {hour:02d}:00:00")
+    
+    results = []
+    
+    for timestamp in timestamps:
+        print(f"\n{'='*60}")
+        print(f"TESTING: {timestamp}")
+        print(f"{'='*60}")
+        
+        try:
+            result = regime_algo.run_regime_analysis(timestamp)
+            results.append({
+                'timestamp': timestamp,
+                'score': result['regime_score'],
+                'interpretation': result['interpretation'],
+                'signals_count': len(result['signals']),
+                'top_count': len(result['top_outliers']),
+                'bottom_count': len(result['bottom_outliers'])
+            })
+            
+            print(f"Score: {result['regime_score']:.1f} | {result['interpretation']}")
+            print(f"Outliers: {len(result['top_outliers'])} top, {len(result['bottom_outliers'])} bottom")
+            print(f"Signals: {len(result['signals'])} from {result['events_analyzed']} events")
+            
+        except Exception as e:
+            print(f"Error: {e}")
+            results.append({
+                'timestamp': timestamp,
+                'score': 50.0,
+                'interpretation': 'Error',
+                'signals_count': 0,
+                'top_count': 0,
+                'bottom_count': 0
+            })
+    
+    # Summary
+    print(f"\n{'='*60}")
+    print("FULL DAY SUMMARY")
+    print(f"{'='*60}")
+    print(f"{'Time':<12} {'Score':<8} {'Signals':<8} {'Interpretation'}")
+    print("-" * 60)
+    
+    for r in results:
+        time_part = r['timestamp'].split()[1][:5]
+        print(f"{time_part:<12} {r['score']:<8.1f} {r['signals_count']:<8} {r['interpretation']}")
+    
+    # Check for score stability
+    scores = [r['score'] for r in results if r['score'] != 50.0]
+    if scores:
+        print(f"\nScore Range: {min(scores):.1f} - {max(scores):.1f}")
+        print(f"Score Std Dev: {np.std(scores):.1f}")
+
+def test_outlier_regime():
+    """Test the outlier regime algorithm standalone"""
+    regime_algo = OutlierRegimeAlgorithm()
+    
+    print("=" * 60)
+    print("OUTLIER REGIME ALGORITHM TEST")
+    print("=" * 60)
+    print(f"Configuration:")
+    print(f"- Lookback period: {regime_algo.lookback_hours} hours")
+    print(f"- BTC drop threshold: {regime_algo.btc_drop_threshold}%")
+    print(f"- BTC bounce threshold: {regime_algo.btc_bounce_threshold}%") 
+    print(f"- EWMA alpha: {regime_algo.ewma_alpha}")
+    print(f"- Outlier Z threshold: {regime_algo.outlier_z_threshold}")
+    print("=" * 60)
+    
+    base_date = TARGET_TIMESTAMP.split()[0]
+    test_timestamps = [
+        TARGET_TIMESTAMP,
+        f"{base_date} 12:00:00", 
+        f"{base_date} 15:30:00"
+    ]
+    
+    for timestamp in test_timestamps:
+        print(f"\n{'='*60}")
+        print(f"TESTING TIMESTAMP: {timestamp}")
+        print(f"{'='*60}")
+        
+        try:
+            result = regime_algo.run_regime_analysis(timestamp)
+            
+            print(f"Regime Score: {result['regime_score']:.1f}/100")
+            print(f"Interpretation: {result['interpretation']}")
+            print(f"Top Outliers: {', '.join(result['top_outliers'][:5])}{'...' if len(result['top_outliers']) > 5 else ''}")
+            print(f"Bottom Outliers: {', '.join(result['bottom_outliers'][:5])}{'...' if len(result['bottom_outliers']) > 5 else ''}")
+            print(f"Events: {result['events_analyzed']} total (Drops: {result.get('drops_count', 0)}, Bounces: {result.get('bounces_count', 0)})")
+            
+            if result['signals']:
+                print(f"Signal Count: {len(result['signals'])}")
+                print(f"Signal Range: [{min(result['signals']):.3f}, {max(result['signals']):.3f}]")
+                print(f"Average Signal: {np.mean(result['signals']):.3f}")
+            else:
+                print("No signals generated")
+                
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    # Run full day test
+    print(f"\n" + "="*60)
+    test_full_day_regime()
+
 def main():
     """Main function to run the pairs trading algorithm on real data"""
     algo = PairsTradingAlgorithm()
+    regime_algo = OutlierRegimeAlgorithm()
     
     print("=" * 60)
     print("PAIRS TRADING ALGORITHM - REAL DATA ANALYSIS")
@@ -830,7 +1287,6 @@ def main():
     print(f"- BTC move threshold: {BTC_MOVE_THRESHOLD}% (noise filtering)")
     print(f"- EWMA smoothing: {'Enabled' if ENABLE_EWMA_SMOOTHING else 'Disabled'} (α={EWMA_ALPHA})")
     print(f"- Target timestamp: {TARGET_TIMESTAMP}")
-    print(f"- Top N outliers: {TOP_N_OUTLIERS}")
     print("=" * 60)
     
     try:
@@ -842,13 +1298,52 @@ def main():
         
         if timestamp_results:
             print(f"Found z-scores for {len(timestamp_results)} coins:")
-            for i, coin_data in enumerate(timestamp_results, 1):
+            for i, coin_data in enumerate(timestamp_results[:15], 1):  # Show top 15
                 outlier_marker = " *" if coin_data['is_outlier'] else ""
                 print(f"{i:2d}. {coin_data['coin']:6s}: Z-score = {coin_data['z_score']:7.3f}, "
                       f"Relative Return = {coin_data['relative_return']:8.4f}, "
                       f"Price = ${coin_data['close_price']:8.2f}{outlier_marker}")
         else:
             print(f"No data found for timestamp {TARGET_TIMESTAMP}")
+        
+        print(f"\n{'='*60}")
+        print(f"OUTLIER REGIME ANALYSIS: {TARGET_TIMESTAMP}")
+        print(f"{'='*60}")
+        
+        regime_result = regime_algo.run_regime_analysis(TARGET_TIMESTAMP)
+        
+        print(f"Regime Score: {regime_result['regime_score']:.1f}/100")
+        print(f"Interpretation: {regime_result['interpretation']}")
+        print(f"Top Outliers (winners): {regime_result['top_outliers']}")
+        print(f"Bottom Outliers (losers): {regime_result['bottom_outliers']}")
+        print(f"BTC Events Analyzed: {regime_result['events_analyzed']} (Drops: {regime_result.get('drops_count', 0)}, Bounces: {regime_result.get('bounces_count', 0)})")
+        print(f"Signals Generated: {len(regime_result['signals'])}")
+        
+        if regime_result['signals']:
+            breakdown = regime_result['signal_breakdown']
+            signal_range = f"[{min(regime_result['signals']):.3f}, {max(regime_result['signals']):.3f}]"
+            print(f"Signal Range: {signal_range}")
+            print(f"Average Signal: {breakdown['avg_signal']:.3f}")
+            print(f"Signal Breakdown: {breakdown['positive_signals']} positive, {breakdown['negative_signals']} negative")
+            print(f"Momentum Direction: {breakdown['momentum_direction'].upper()}")
+        
+        print(f"\nTrading Recommendation:")
+        if regime_result['regime_score'] < 30:
+            print("MEAN REVERSION: Outliers likely to reverse toward mean")
+            print("  → Top outliers may decline, Bottom outliers may rise")
+        elif regime_result['regime_score'] > 70:
+            momentum_dir = regime_result['signal_breakdown']['momentum_direction']
+            print(f"MOMENTUM ({momentum_dir.upper()}): Outliers likely to continue their current trend")
+            if momentum_dir == 'up':
+                print("  → Top outliers may continue rising, Bottom outliers may catch up")
+            elif momentum_dir == 'down':
+                print("  → Top outliers may decline, Bottom outliers may decline further")
+        else:
+            print("NEUTRAL - Mixed signals")
+            
+        # Run additional test
+        print(f"\n" + "="*60)
+        test_outlier_regime()
         
     except Exception as e:
         print(f"Error running analysis: {e}")
