@@ -1,15 +1,18 @@
-# Core dependencies
-# Add your project dependencies here
+# Outlier Analysis Trading System Dependencies
 
-# Development dependencies
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+numba>=0.57.0
 
-# Data processing and API dependencies
-requests==2.31.0
-pandas==2.1.4
-pyarrow==14.0.2
+# API and networking
+requests>=2.28.0
+websockets>=12.0
 
-# Optional: Common data science libraries
-# numpy==1.24.3
-# matplotlib==3.7.2
-# seaborn==0.12.2
+# Live monitoring and scheduling
+schedule>=1.2.0
+python-dotenv>=1.0.0
+
+# Binance API
+python-binance>=1.0.17
 

@@ -8,13 +8,22 @@ import logging
 
 from main import COINS
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class BinanceDataDownloader:
     def __init__(self, data_folder: str = "../data"):
-        self.base_url = "https://api.binance.com/api/v3"
+        self.spot_base_url = "https://api.binance.com/api/v3"
+        self.futures_base_url = "https://fapi.binance.com/fapi/v1"
         self.data_folder = data_folder
+        
+        # Special symbol mappings for Binance futures
+        self.symbol_mappings = {
+            'PEPE': '1000PEPEUSDT',
+            'BONK': '1000BONKUSDT', 
+            'FLOKI': '1000FLOKIUSDT'
+        }
+        
         self.ensure_data_folder()
     
     def ensure_data_folder(self):
@@ -22,7 +31,6 @@ class BinanceDataDownloader:
         logger.info(f"Data folder ensured: {self.data_folder}")
     
     def get_klines(self, symbol: str, interval: str = "5m", start_time: int = None, end_time: int = None) -> List[List]:
-        url = f"{self.base_url}/klines"
         params = {
             'symbol': symbol,
             'interval': interval,
@@ -34,16 +42,23 @@ class BinanceDataDownloader:
         if end_time:
             params['endTime'] = end_time
         
+        # Use futures market only
         try:
+            url = f"{self.futures_base_url}/klines"
             response = requests.get(url, params=params)
             response.raise_for_status()
+            logger.info(f"Successfully fetched {symbol} from futures market")
             return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching data for {symbol}: {e}")
+        except requests.exceptions.RequestException as futures_error:
+            logger.error(f"Futures market failed for {symbol}: {futures_error}")
             return []
     
     def download_coin_data(self, coin: str, days_back: int = 365) -> bool:
-        symbol = f"{coin}USDT"
+        # Use special mapping if available, otherwise default format
+        if coin in self.symbol_mappings:
+            symbol = self.symbol_mappings[coin]
+        else:
+            symbol = f"{coin}USDT"
         
         end_time = int(time.time() * 1000)
         start_time = end_time - (days_back * 24 * 60 * 60 * 1000)
@@ -117,8 +132,8 @@ class BinanceDataDownloader:
 
 
 def main():
-    downloader = BinanceDataDownloader()
-    downloader.download_all_coins(days_back=365)
+    downloader = BinanceDataDownloader("/Applications/PairsAlgo/data")
+    downloader.download_all_coins(days_back=7)  # Get 7 days for better z-scores
 
 
 if __name__ == "__main__":
