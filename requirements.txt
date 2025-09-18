@@ -15,4 +15,8 @@ python-dotenv>=1.0.0
 
 # Binance API
 python-binance>=1.0.17
+fastparquet>=0.8.0
+pyarrow>=14.0.0
 
+# Machine Learning for Narrative Analysis
+scikit-learn>=1.3.0

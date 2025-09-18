@@ -132,7 +132,8 @@ class BinanceDataDownloader:
 
 
 def main():
-    downloader = BinanceDataDownloader("/Applications/PairsAlgo/data")
+    from main import DATA_FOLDER
+    downloader = BinanceDataDownloader(DATA_FOLDER)
     downloader.download_all_coins(days_back=7)  # Get 7 days for better z-scores
 
 
