@@ -5,13 +5,14 @@
 import os
 
 # System Control Configuration
-ENABLE_DATA_DOWNLOAD = False  # Enable automatic data downloading (set to False for faster testing)
+ENABLE_DATA_DOWNLOAD = True  # Enable automatic data downloading (set to False for faster testing)
 ENABLE_OUTLIER_DETECTION = True  # Enable outlier detection system
 ENABLE_FULL_SYSTEM_STATUS = True  # Enable full system status reporting
 
 # Data Download Configuration
 DATA_DOWNLOAD_DAYS = 3  # Days of data to download for outlier detection
 FORCE_DATA_REFRESH = False  # Force re-download of existing data
+DOWNLOAD_INTERVALS = ["5m", "15m", "1h", "4h", "1d"]  # Timeframes to download
 
 # System Display Configuration
 MAX_OUTLIER_DISPLAY = 999  # Maximum outliers to display in ranking (999 = all coins)
@@ -120,15 +121,68 @@ COINS = list(COINS_DATA.keys())
 # Data configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_FOLDER = os.path.join(BASE_DIR, "data")
-TIMEFRAME = "5m"
+PRIMARY_TIMEFRAME = "5m"  # Primary timeframe for analysis
+MULTI_TIMEFRAMES = ["5m", "15m", "1h"]  # Legacy multiple timeframes for confirmation
+MULTI_TIMEFRAMES_ADVANCED = ["1h", "4h", "1d"]  # Advanced MTF for structural confirmation
 
 # Outlier Detection Configuration
 Z_SCORE_WINDOW = 288  # Number of bars for Z-score calculation (24 hours of 5m bars)
-PRICE_CHANGE_PERIOD = 144  # Number of 5m bars for 5m price change calculation
+PRICE_CHANGE_PERIOD = 12  # Number of bars for price change calculation (1 hour of 5m bars)
 EWMA_ALPHA = 0.005  # EWMA smoothing factor
-Z_SCORE_WEIGHT = 0.74  # Weight for Z-score in final outlier score
-PRICE_CHANGE_WEIGHT = 0.03  # Weight for 5m price change in final outlier score
-VOLUME_MCAP_WEIGHT = 0.23  # Weight for volume/market cap ratio in final outlier score
+Z_SCORE_WEIGHT = 0.50  # Weight for Z-score in final outlier score
+PRICE_CHANGE_WEIGHT = 0.05  # Weight for price change in final outlier score
+VOLUME_MCAP_WEIGHT = 0.15  # Weight for volume/market cap ratio in final outlier score
+
+# ============================================================================
+# CORE FEATURES - ORTHOGONAL SIGNALS
+# ============================================================================
+
+# Core Signal: BTC-Relative Z-Score (PRIMARY EDGE)
+USE_MODIFIED_ZSCORE = True  # MAD-based Z-score (fat-tail robust)
+MAD_SCALE_FACTOR = 0.6745  # Standard MAD scaling factor
+
+# Volume Confirmation (ORTHOGONAL - not price-based)
+VOLUME_SURGE_THRESHOLD = 2.0  # Only significant surges (>2 std devs)
+VOLUME_SURGE_MULTIPLIER = 1.3  # 30% boost for volume-confirmed moves
+
+# Half-Life (useful for position sizing, not scoring)
+HALF_LIFE_ENABLED = True  # Calculate mean reversion speed
+HALF_LIFE_MIN_PERIODS = 100  # Minimum data for reliable estimate
+
+# Advanced Multi-Timeframe (1h/4h/1d structural confirmation)
+MULTI_TIMEFRAMES_ADVANCED = ["1h", "4h", "1d"]
+MTF_REQUIRE_ALIGNMENT = 2  # Minimum aligned timeframes for confirmation
+
+# Derivatives Signals (TIER 1 - Easy API access, strong signals)
+FUNDING_RATE_ENABLED = True  # Perpetual funding rate analysis
+FUNDING_RATE_THRESHOLD = 2.0  # Z-score threshold for abnormal funding
+FUNDING_RATE_MULTIPLIER = 1.2  # 20% boost for extreme funding (reversal signal)
+
+OI_CHANGE_ENABLED = True  # Open Interest change detection
+OI_CHANGE_WINDOW = 12  # Periods to measure OI change (1 hour on 5m)
+OI_CHANGE_THRESHOLD = 2.0  # Z-score threshold for abnormal OI change
+OI_CHANGE_MULTIPLIER = 1.15  # 15% boost for significant position building
+
+PERP_SPOT_BASIS_ENABLED = True  # Perpetual-Spot premium analysis
+PERP_SPOT_THRESHOLD = 0.5  # % threshold for excessive premium/discount
+PERP_SPOT_PENALTY = 0.9  # 10% penalty for excessive speculation
+
+# Order Book Signals (Market microstructure)
+ORDER_BOOK_ENABLED = True  # Order book imbalance analysis
+ORDER_BOOK_DEPTH_LEVELS = 10  # Number of order book levels to analyze
+BID_ASK_IMBALANCE_THRESHOLD = 0.3  # Imbalance threshold (0.3 = 30% skew)
+ORDER_BOOK_MULTIPLIER = 1.1  # 10% boost for strong imbalance
+
+# Legacy MTF (keep for backwards compatibility but minimal weight)
+MTF_CONFIRMATION_WEIGHT_1m = 0.60
+MTF_CONFIRMATION_WEIGHT_5m = 0.30
+MTF_CONFIRMATION_WEIGHT_15m = 0.10
+MTF_MINIMUM_CONFIRMATION = 0.5
+MTF_WEIGHTS = {
+    '1m': MTF_CONFIRMATION_WEIGHT_1m,
+    '5m': MTF_CONFIRMATION_WEIGHT_5m,
+    '15m': MTF_CONFIRMATION_WEIGHT_15m
+}
 
 
 # Volume/Market Cap Configuration
@@ -158,10 +212,10 @@ def run_data_download():
         import time
         
         # Download outlier detection data
-        print(f"Downloading {DATA_DOWNLOAD_DAYS} days of 5m data...")
+        print(f"Downloading {DATA_DOWNLOAD_DAYS} days of data for {len(DOWNLOAD_INTERVALS)} timeframes: {DOWNLOAD_INTERVALS}...")
         start_time = time.time()
         downloader = BinanceDataDownloader(DATA_FOLDER)
-        downloader.download_all_coins(days_back=DATA_DOWNLOAD_DAYS)
+        downloader.download_all_coins(days_back=DATA_DOWNLOAD_DAYS, intervals=DOWNLOAD_INTERVALS)
         elapsed = time.time() - start_time
         print(f"Data download completed in {elapsed:.1f}s")
             
@@ -194,17 +248,33 @@ def run_outlier_analysis():
         if not all_scores.empty:
             print(f"\nAnalyzed {len(all_scores)} coins in {elapsed:.2f}s")
             print(f"\n=== TOP {min(MAX_OUTLIER_DISPLAY, len(all_scores))} OUTLIERS ===")
-            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'BTC Ratio':<12} {'Z-Score':<8} {'Price Change%':<14} {'Vol/MCap':<11} {'Score':<8}")
-            print("-" * 95)
+            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'Z-Score':<10} {'Score':<10} {'HL(h)':<8} {'Vol-Z':<8} {'MTF':<5} {'FR%':<8} {'Basis%':<8} {'OB':<8} {'Signal':<12}")
+            print("-" * 115)
             
             display_count = min(MAX_OUTLIER_DISPLAY, len(all_scores))
             for idx, (_, row) in enumerate(all_scores.head(display_count).iterrows(), 1):
-                btc_ratio = row.get('coin_btc_ratio', 0)
-                price_change = row.get('price_change', 0)
-                volume_mcap_norm = row.get('volume_mcap_normalized', 0)
-                relative_score = row.get('relative_score', 0)
+                z_score = row.get('z_score', 0)
+                score = row.get('relative_score', 0)
+                half_life = row.get('half_life', 999)
+                vol_surge = row.get('volume_surge_z', 0)
+                mtf_aligned = row.get('mtf_aligned', 0)
+                funding_rate = row.get('funding_rate', 0)
+                perp_basis = row.get('perp_spot_basis', 0)
+                ob_imbalance = row.get('bid_ask_imbalance', 0)
                 
-                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {btc_ratio:<12.6f} {row['z_score']:<8.2f} {price_change:<14.2f} {volume_mcap_norm:<11.4f} {relative_score:<8.2f}")
+                # Signal interpretation
+                if vol_surge > 2.0 and mtf_aligned >= 2:
+                    signal = f"STRONG ({vol_surge:.1f}σ)"
+                elif mtf_aligned >= 2:
+                    signal = "CONFIRMED"
+                elif abs(z_score) > 2.0:
+                    signal = "OUTLIER"
+                elif abs(z_score) > 1.5:
+                    signal = "Moderate"
+                else:
+                    signal = "Weak"
+                
+                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {score:<10.2f} {half_life:<8.1f} {vol_surge:<8.2f} {mtf_aligned:<5} {funding_rate:<8.3f} {perp_basis:<8.3f} {ob_imbalance:<8.3f} {signal:<12}")
                 
             return {'total_coins': len(all_scores), 'top_outliers': all_scores.head(10), 'execution_time': elapsed}
         else:
