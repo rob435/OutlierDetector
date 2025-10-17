@@ -12,15 +12,13 @@ from main import (
     USE_MODIFIED_ZSCORE, MAD_SCALE_FACTOR, USE_REAL_MARKET_CAP, VOLUME_MCAP_NORMALIZATION,
     FUNDING_RATE_ENABLED, FUNDING_RATE_EXTREME_THRESHOLD, FUNDING_RATE_MULTIPLIER,
     OI_ENABLED, OI_THRESHOLD_USD,
-    LIQUIDATIONS_ENABLED, LIQUIDATION_THRESHOLD_USD, LIQUIDATION_MULTIPLIER,
     LONG_SHORT_RATIO_ENABLED, LS_RATIO_EXTREME_LONG, LS_RATIO_EXTREME_SHORT, LS_RATIO_MULTIPLIER,
     Z_SCORE_VELOCITY_ENABLED, Z_SCORE_VELOCITY_WINDOW, Z_SCORE_VELOCITY_THRESHOLD,
-    Z_SCORE_ACCELERATION_ENABLED, Z_SCORE_ACCELERATION_WINDOW, Z_SCORE_ACCELERATION_THRESHOLD,
     PREDICTIVE_SIGNAL_ENABLED, PREDICTIVE_EARLY_ENTRY_Z, PREDICTIVE_MOMENTUM_EXHAUSTION_Z,
     PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD
 )
 from coinmarketcap_client import CoinMarketCapClient
-from binance_derivatives import AggregatedDerivativesClient
+from binance_futures_client import BinanceFuturesClient
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -46,15 +44,12 @@ class OutlierDetector:
         self.multi_timeframes_advanced = MULTI_TIMEFRAMES_ADVANCED
         self.mtf_require_alignment = MTF_REQUIRE_ALIGNMENT
 
-        # Aggregated derivatives signals
+        # Derivatives signals
         self.funding_rate_enabled = FUNDING_RATE_ENABLED
         self.funding_rate_extreme_threshold = FUNDING_RATE_EXTREME_THRESHOLD
         self.funding_rate_multiplier = FUNDING_RATE_MULTIPLIER
         self.oi_enabled = OI_ENABLED
         self.oi_threshold_usd = OI_THRESHOLD_USD
-        self.liquidations_enabled = LIQUIDATIONS_ENABLED
-        self.liquidation_threshold_usd = LIQUIDATION_THRESHOLD_USD
-        self.liquidation_multiplier = LIQUIDATION_MULTIPLIER
         self.long_short_ratio_enabled = LONG_SHORT_RATIO_ENABLED
         self.ls_ratio_extreme_long = LS_RATIO_EXTREME_LONG
         self.ls_ratio_extreme_short = LS_RATIO_EXTREME_SHORT
@@ -64,16 +59,13 @@ class OutlierDetector:
         self.z_score_velocity_enabled = Z_SCORE_VELOCITY_ENABLED
         self.z_score_velocity_window = Z_SCORE_VELOCITY_WINDOW
         self.z_score_velocity_threshold = Z_SCORE_VELOCITY_THRESHOLD
-        self.z_score_acceleration_enabled = Z_SCORE_ACCELERATION_ENABLED
-        self.z_score_acceleration_window = Z_SCORE_ACCELERATION_WINDOW
-        self.z_score_acceleration_threshold = Z_SCORE_ACCELERATION_THRESHOLD
         self.predictive_signal_enabled = PREDICTIVE_SIGNAL_ENABLED
         self.predictive_early_entry_z = PREDICTIVE_EARLY_ENTRY_Z
         self.predictive_momentum_exhaustion_z = PREDICTIVE_MOMENTUM_EXHAUSTION_Z
         self.predictive_velocity_reversal_threshold = PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD
 
-        # Initialize aggregated derivatives client (Coinglass)
-        self.derivatives_client = AggregatedDerivativesClient()
+        # Initialize Binance Futures derivatives client (PUBLIC API, no auth required)
+        self.derivatives_client = BinanceFuturesClient()
         
         # Initialize CoinMarketCap client and fetch market cap data once
         if self.use_real_market_cap:
@@ -284,19 +276,9 @@ class OutlierDetector:
 
         return velocity.fillna(0)
 
-    def calculate_z_score_acceleration(self, velocity: pd.Series) -> pd.Series:
-        """Calculate Z-score acceleration (rate of change of velocity) - EARLY MOMENTUM DETECTION"""
-        if not self.z_score_acceleration_enabled or len(velocity) < self.z_score_acceleration_window:
-            return pd.Series(0, index=velocity.index)
-
-        # Calculate rolling acceleration (change in velocity)
-        acceleration = velocity.diff(self.z_score_acceleration_window) / self.z_score_acceleration_window
-
-        return acceleration.fillna(0)
-
-    def classify_predictive_signal(self, z_score: float, velocity: float, acceleration: float,
+    def classify_predictive_signal(self, z_score: float, velocity: float,
                                    volume_surge_z: float) -> Dict[str, any]:
-        """Classify predictive signal type - TRANSFORMS REACTIVE TO PREDICTIVE"""
+        """Classify predictive signal type using velocity only - STAT-ARB FOCUSED"""
         if not self.predictive_signal_enabled:
             return {
                 'signal': 'NEUTRAL',
@@ -307,49 +289,17 @@ class OutlierDetector:
 
         abs_z = abs(z_score)
 
-        # EARLY ENTRY: Z-score building + positive acceleration + volume confirmation
-        if (abs_z >= self.predictive_early_entry_z and
-            abs_z < self.predictive_momentum_exhaustion_z and
-            acceleration > self.z_score_acceleration_threshold):
-
-            confidence = min(abs(acceleration) / 0.5, 1.0)  # Scale 0-1
-
-            # Volume confirmation boosts confidence
-            if volume_surge_z > self.volume_surge_threshold:
-                confidence = min(confidence * 1.3, 1.0)
-
-            return {
-                'signal': 'EARLY_ENTRY',
-                'confidence': confidence,
-                'action': 'BUY' if z_score > 0 else 'SELL',
-                'reason': f'Momentum building (accel={acceleration:.3f})'
-            }
-
-        # MOMENTUM CONTINUATION: Strong Z-score + positive velocity + positive acceleration
-        elif (abs_z >= self.predictive_momentum_exhaustion_z * 0.7 and
-              velocity * np.sign(z_score) > self.z_score_velocity_threshold and
-              acceleration > 0):
+        # MOMENTUM CONTINUATION: Strong Z-score + positive velocity
+        if (abs_z >= self.predictive_momentum_exhaustion_z * 0.7 and
+              velocity * np.sign(z_score) > self.z_score_velocity_threshold):
 
             confidence = min(abs(velocity) / 1.0, 1.0)
 
             return {
                 'signal': 'MOMENTUM',
                 'confidence': confidence,
-                'action': 'HOLD' if z_score > 0 else 'HOLD',
+                'action': 'HOLD',
                 'reason': f'Strong momentum (vel={velocity:.3f})'
-            }
-
-        # EXHAUSTION WARNING: Extreme Z-score + decelerating
-        elif (abs_z >= self.predictive_momentum_exhaustion_z and
-              acceleration < -self.z_score_acceleration_threshold):
-
-            confidence = min(abs(acceleration) / 0.5, 1.0)
-
-            return {
-                'signal': 'EXHAUSTION',
-                'confidence': confidence,
-                'action': 'EXIT',
-                'reason': f'Momentum dying (accel={acceleration:.3f})'
             }
 
         # REVERSAL: Velocity turning negative
@@ -470,9 +420,8 @@ class OutlierDetector:
         # Calculate rolling Z-score for close prices
         z_score = self.calculate_rolling_z_score(df['close'], self.z_score_window)
 
-        # Calculate predictive signals: velocity and acceleration
+        # Calculate predictive signals: velocity only
         z_score_velocity = self.calculate_z_score_velocity(z_score)
-        z_score_acceleration = self.calculate_z_score_acceleration(z_score_velocity)
 
         # Calculate price change using configured period
         price_change = self.calculate_price_change(df['close'], self.price_change_period)
@@ -489,6 +438,38 @@ class OutlierDetector:
         latest_z_score = z_score.iloc[-1] if not z_score.empty else 0
         relative_score = self.calculate_relative_score(latest_z_score)
 
+        # Fetch Binance Futures derivatives data (PUBLIC API)
+        funding_rate = 0
+        oi_change_1h = 0
+        oi_change_24h = 0
+        long_short_ratio = 0
+
+        try:
+            # Funding rate (8h intervals on Binance)
+            if self.funding_rate_enabled:
+                fr = self.derivatives_client.get_funding_rate(coin)
+                if fr is not None:
+                    funding_rate = fr
+
+            # Open interest change % (1H and 24H)
+            if self.oi_enabled:
+                oi_1h = self.derivatives_client.get_open_interest_change(coin, lookback_hours=1)
+                if oi_1h is not None:
+                    oi_change_1h = oi_1h['change_pct']
+
+                oi_24h = self.derivatives_client.get_open_interest_change(coin, lookback_hours=24)
+                if oi_24h is not None:
+                    oi_change_24h = oi_24h['change_pct']
+
+            # Long/Short ratio (top traders by positions, 5m period)
+            if self.long_short_ratio_enabled:
+                ls_ratio = self.derivatives_client.get_long_short_ratio(coin, period='5m')
+                if ls_ratio is not None:
+                    long_short_ratio = ls_ratio
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch Binance Futures derivatives data for {coin}: {e}")
+
         # Create results dataframe
         results = pd.DataFrame({
             'timestamp': df['open_time'],
@@ -500,10 +481,13 @@ class OutlierDetector:
             'volume_mcap_normalized': volume_mcap_normalized,
             'z_score': z_score,
             'z_velocity': z_score_velocity,
-            'z_accel': z_score_acceleration,
             'price_change': price_change,
             'relative_score': relative_score,
-            'half_life': half_life
+            'half_life': half_life,
+            'funding_rate': funding_rate,
+            'oi_change_1h': oi_change_1h,
+            'oi_change_24h': oi_change_24h,
+            'long_short_ratio': long_short_ratio
         })
 
         return results
@@ -532,9 +516,8 @@ class OutlierDetector:
         # Calculate BTC-relative Z-score
         z_score = self.calculate_btc_relative_z_score(merged['close'], merged['btc_close'], self.z_score_window)
 
-        # Calculate predictive signals: velocity and acceleration
+        # Calculate predictive signals: velocity only
         z_score_velocity = self.calculate_z_score_velocity(z_score)
-        z_score_acceleration = self.calculate_z_score_acceleration(z_score_velocity)
 
         # Calculate price change using configured period
         price_change = self.calculate_price_change(merged['close'], self.price_change_period)
@@ -549,41 +532,37 @@ class OutlierDetector:
         volume_surge_z = self.calculate_volume_surge_score(merged['volume'])
         advanced_mtf = self.calculate_advanced_mtf_confirmation(coin)
         
-        # Fetch aggregated derivatives data (Coinglass - 10+ exchanges)
+        # Fetch Binance Futures derivatives data (40%+ of market, PUBLIC API)
         funding_rate = 0
-        open_interest = 0
-        liquidation_total = 0
-        liquidation_ratio = 0
+        oi_change_1h = 0
+        oi_change_24h = 0
         long_short_ratio = 0
 
         try:
-            # Funding rate (volume-weighted across all exchanges)
+            # Funding rate (8h intervals on Binance)
             if self.funding_rate_enabled:
                 fr = self.derivatives_client.get_funding_rate(coin)
                 if fr is not None:
                     funding_rate = fr
 
-            # Open interest (aggregated total)
+            # Open interest change % (1H and 24H)
             if self.oi_enabled:
-                oi = self.derivatives_client.get_open_interest(coin)
-                if oi is not None:
-                    open_interest = oi
+                oi_1h = self.derivatives_client.get_open_interest_change(coin, lookback_hours=1)
+                if oi_1h is not None:
+                    oi_change_1h = oi_1h['change_pct']
 
-            # Liquidations (1h window)
-            if self.liquidations_enabled:
-                liq = self.derivatives_client.get_liquidations(coin, '1h')
-                if liq is not None:
-                    liquidation_total = liq['total_liq']
-                    liquidation_ratio = liq['liq_ratio']
+                oi_24h = self.derivatives_client.get_open_interest_change(coin, lookback_hours=24)
+                if oi_24h is not None:
+                    oi_change_24h = oi_24h['change_pct']
 
-            # Long/Short ratio (aggregated positioning)
+            # Long/Short ratio (top traders by positions, 5m period)
             if self.long_short_ratio_enabled:
-                ls_ratio = self.derivatives_client.get_long_short_ratio(coin)
+                ls_ratio = self.derivatives_client.get_long_short_ratio(coin, period='5m')
                 if ls_ratio is not None:
                     long_short_ratio = ls_ratio
 
         except Exception as e:
-            logger.warning(f"Failed to fetch aggregated derivatives data for {coin}: {e}")
+            logger.warning(f"Failed to fetch Binance Futures derivatives data for {coin}: {e}")
 
         # ============================================================================
         # SCORING - ORTHOGONAL SIGNALS + PREDICTIVE CLASSIFICATION
@@ -591,13 +570,11 @@ class OutlierDetector:
 
         latest_z_score = z_score.iloc[-1] if not z_score.empty else 0
         latest_velocity = z_score_velocity.iloc[-1] if not z_score_velocity.empty else 0
-        latest_acceleration = z_score_acceleration.iloc[-1] if not z_score_acceleration.empty else 0
 
         # Classify predictive signal
         predictive_signal = self.classify_predictive_signal(
             latest_z_score,
             latest_velocity,
-            latest_acceleration,
             volume_surge_z
         )
 
@@ -615,7 +592,7 @@ class OutlierDetector:
         if mtf_aligned >= self.mtf_require_alignment:
             final_score *= 1.2  # 20% boost for structural confirmation
 
-        # AGGREGATED FUNDING RATE: Extreme funding = overleveraged positions
+        # BINANCE FUNDING RATE: Extreme funding = overleveraged positions
         if self.funding_rate_enabled and abs(funding_rate) > self.funding_rate_extreme_threshold:
             # Extreme positive funding = overleveraged longs = bearish reversal
             # Extreme negative funding = overleveraged shorts = bullish reversal
@@ -623,12 +600,7 @@ class OutlierDetector:
                (latest_z_score < 0 and funding_rate < -self.funding_rate_extreme_threshold):
                 final_score *= self.funding_rate_multiplier
 
-        # LIQUIDATION CASCADE: High liquidations = forced selling/buying pressure
-        if self.liquidations_enabled and liquidation_total > self.liquidation_threshold_usd:
-            # Major liquidations indicate forced position closure = continuation signal
-            final_score *= self.liquidation_multiplier
-
-        # LONG/SHORT RATIO: Aggregated positioning across exchanges
+        # LONG/SHORT RATIO: Binance top trader positioning
         if self.long_short_ratio_enabled:
             # Overleveraged longs = bearish reversal signal
             if long_short_ratio > self.ls_ratio_extreme_long and latest_z_score > 0:
@@ -637,11 +609,6 @@ class OutlierDetector:
             elif long_short_ratio < self.ls_ratio_extreme_short and latest_z_score < 0:
                 final_score *= self.ls_ratio_multiplier
 
-        # OPEN INTEREST FILTER: Only trade liquid markets
-        if self.oi_enabled and open_interest > 0 and open_interest < self.oi_threshold_usd:
-            # Low liquidity = reduce confidence
-            final_score *= 0.8
-        
         final_score = np.clip(final_score, -10, 10)
 
         # Create results dataframe
@@ -657,16 +624,14 @@ class OutlierDetector:
             'volume_mcap_normalized': volume_mcap_normalized,
             'z_score': z_score,
             'z_velocity': z_score_velocity,
-            'z_accel': z_score_acceleration,
             'price_change': price_change,
             'relative_score': final_score,
             'half_life': half_life,
             'volume_surge_z': volume_surge_z,
             'mtf_aligned': mtf_aligned,
             'funding_rate': funding_rate,
-            'open_interest': open_interest,
-            'liquidation_total': liquidation_total,
-            'liquidation_ratio': liquidation_ratio,
+            'oi_change_1h': oi_change_1h,
+            'oi_change_24h': oi_change_24h,
             'long_short_ratio': long_short_ratio,
             'pred_signal': predictive_signal['signal'],
             'pred_action': predictive_signal['action'],

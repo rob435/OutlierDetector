@@ -5,14 +5,19 @@
 import os
 
 # System Control Configuration
-ENABLE_DATA_DOWNLOAD = True  # Enable automatic data downloading (set to False for faster testing)
+ENABLE_DATA_DOWNLOAD = False  # Enable automatic data downloading (set to False for faster testing)
 ENABLE_OUTLIER_DETECTION = True  # Enable outlier detection system
 ENABLE_FULL_SYSTEM_STATUS = True  # Enable full system status reporting
 
 # Data Download Configuration - STAT-ARB REQUIRES MORE HISTORY
-DATA_DOWNLOAD_DAYS = 30  # Days of data to download for 14-day z-score window + buffer
+DATA_DOWNLOAD_DAYS = 30  # Days of OHLCV data to download for 14-day z-score window + buffer
 FORCE_DATA_REFRESH = True  # Force re-download of existing data
 DOWNLOAD_INTERVALS = ["5m", "15m", "1h", "4h", "1d"]  # Timeframes to download
+
+# Derivatives Historical Data Configuration
+DOWNLOAD_DERIVATIVES_HISTORY = True # Download historical funding/OI/LS data for backtesting
+DERIVATIVES_DOWNLOAD_DAYS = 20  # Days of derivatives history (limited by Binance retention)
+DERIVATIVES_DOWNLOAD_PERIOD = "4h"  # Period for OI/LS data (4h allows 30 days, 1h only allows 20 days)
 
 # System Display Configuration
 MAX_OUTLIER_DISPLAY = 999  # Maximum outliers to display in ranking (999 = all coins)
@@ -22,89 +27,32 @@ DISPLAY_SYSTEM_METRICS = True  # Show system performance metrics
 VERBOSE_OUTPUT = False  # Enable detailed logging output
 SYSTEM_HEALTH_CHECK = True  # Enable system health monitoring
 
-# Coin Configuration
-COINS_DATA = {
+# Coin Configuration - Simple List
+COINS = [
     # MAJOR ASSETS
-    'BTC': {'narratives': ['store_of_value', 'digital_gold', 'bitcoin']},
-    'ETH': {'narratives': ['smart_contracts', 'defi', 'ethereum_ecosystem', 'layer1']},
-    'BNB': {'narratives': ['exchange_token', 'bsc_ecosystem', 'centralized_exchange']},
-    'ADA': {'narratives': ['layer1', 'proof_of_stake', 'academic']},
-    'XRP': {'narratives': ['payments', 'enterprise', 'banking']},
-    'SOL': {'narratives': ['layer1', 'high_performance', 'solana_ecosystem', 'defi', 'nft']},
-    'DOT': {'narratives': ['interoperability', 'layer1', 'polkadot_ecosystem']},
-    'AVAX': {'narratives': ['layer1', 'ethereum_alternative', 'enterprise']},
-    'LINK': {'narratives': ['oracle', 'defi', 'infrastructure']},
-    'LTC': {'narratives': ['payments', 'bitcoin_fork', 'store_of_value']},
-    
-    # ESTABLISHED ALTCOINS
-    'UNI': {'narratives': ['defi', 'dex', 'ethereum_ecosystem']},
-    'ALGO': {'narratives': ['layer1', 'proof_of_stake', 'enterprise']},
-    'BCH': {'narratives': ['payments', 'bitcoin_fork', 'scaling']},
-    'XLM': {'narratives': ['payments', 'banking', 'enterprise']},
-    'VET': {'narratives': ['enterprise', 'supply_chain', 'real_world_utility']},
-    'FIL': {'narratives': ['storage', 'web3', 'infrastructure']},
-    'ETC': {'narratives': ['layer1', 'proof_of_work', 'ethereum_classic']},
-    'ATOM': {'narratives': ['interoperability', 'layer1', 'cosmos_ecosystem']},
-    'HBAR': {'narratives': ['enterprise', 'layer1', 'hashgraph']},
-    'ICP': {'narratives': ['web3', 'layer1', 'decentralized_internet']},
-    
-    # LAYER 1 & LAYER 2
-    'APT': {'narratives': ['layer1', 'high_performance', 'move_language']},
-    'ARB': {'narratives': ['layer2', 'ethereum_ecosystem', 'scaling']},
-    'SUI': {'narratives': ['layer1', 'high_performance', 'move_language']},
-    'NEAR': {'narratives': ['layer1', 'developer_friendly', 'web3']},
-    'TIA': {'narratives': ['modular_blockchain', 'layer1', 'infrastructure']},
-    'SEI': {'narratives': ['layer1', 'trading_focused', 'high_performance']},
-    'TON': {'narratives': ['layer1', 'telegram', 'messaging']},
-    'INJ': {'narratives': ['defi', 'derivatives', 'layer1']},
-    
-    # DEFI PROTOCOLS
-    'CRV': {'narratives': ['defi', 'dex', 'ethereum_ecosystem', 'stablecoins']},
-    'GRT': {'narratives': ['infrastructure', 'web3', 'indexing']},
-    'RUNE': {'narratives': ['defi', 'cross_chain', 'dex']},
-    'LDO': {'narratives': ['defi', 'staking', 'ethereum_ecosystem']},
-    'CAKE': {'narratives': ['defi', 'dex', 'bsc_ecosystem']},
-    'SUSHI': {'narratives': ['defi', 'dex', 'ethereum_ecosystem']},
-    'ENS': {'narratives': ['web3', 'ethereum_ecosystem', 'infrastructure']},
-    'AAVE': {'narratives': ['defi', 'lending', 'ethereum_ecosystem']},
-    'PENDLE': {'narratives': ['defi', 'yield', 'ethereum_ecosystem']},
-    'ENA': {'narratives': ['defi', 'stablecoins', 'ethereum_ecosystem']},
-    'MORPHO': {'narratives': ['defi', 'lending', 'ethereum_ecosystem']},
-    
-    # MEMECOINS
-    'DOGE': {'narratives': ['meme', 'payments', 'elon', 'community']},
-    'PEPE': {'narratives': ['meme', 'ethereum_ecosystem', 'community']},
-    'BONK': {'narratives': ['meme', 'solana_ecosystem', 'community']},
-    'WIF': {'narratives': ['meme', 'solana_ecosystem', 'community']},
-    'FLOKI': {'narratives': ['meme', 'elon', 'community']},
-    'FARTCOIN': {'narratives': ['meme', 'high_volatility', 'speculative']},
-    
-    # GAMING & NFTS
-    'GALA': {'narratives': ['gaming', 'nft', 'metaverse']},
-    'ENJ': {'narratives': ['gaming', 'nft', 'metaverse']},
-    'IMX': {'narratives': ['gaming', 'nft', 'layer2', 'ethereum_ecosystem']},
-    'FLOW': {'narratives': ['nft', 'gaming', 'layer1']},
-    
-    # AI & EMERGING
-    'TAO': {'narratives': ['ai', 'infrastructure', 'decentralized_compute']},
-    'WLD': {'narratives': ['ai', 'identity', 'sam_altman']},
-    'VIRTUAL': {'narratives': ['ai', 'metaverse', 'agents']},
-    'HYPE': {'narratives': ['derivatives', 'defi', 'high_performance']},
-    
-    # SPECIALIZED
-    'DYDX': {'narratives': ['derivatives', 'defi', 'trading']},
-    'PYTH': {'narratives': ['oracle', 'infrastructure', 'trading']},
-    'JUP': {'narratives': ['defi', 'dex', 'solana_ecosystem']},
-    'SPX': {'narratives': ['meme', 'tradfi', 'speculative']},
-    'ETHFI': {'narratives': ['defi', 'staking', 'ethereum_ecosystem']},
-    'XTZ': {'narratives': ['layer1', 'governance', 'enterprise']},
-    'PUMP': {'narratives': ['meme', 'solana_ecosystem', 'platform']},
-    'S': {'narratives': ['unknown']},
-    'TRX': {'narratives': ['layer1', 'entertainment', 'payments']}
-}
+    'BTC', 'ETH', 'BNB', 'ADA', 'XRP', 'SOL', 'DOT', 'AVAX', 'LINK', 'LTC',
 
-# Extract coin symbols
-COINS = list(COINS_DATA.keys())
+    # ESTABLISHED ALTCOINS
+    'UNI', 'ALGO', 'BCH', 'XLM', 'VET', 'FIL', 'ETC', 'ATOM', 'HBAR', 'ICP',
+
+    # LAYER 1 & LAYER 2
+    'APT', 'ARB', 'SUI', 'NEAR', 'TIA', 'SEI', 'TON', 'INJ',
+
+    # DEFI PROTOCOLS
+    'CRV', 'GRT', 'RUNE', 'LDO', 'CAKE', 'SUSHI', 'ENS', 'AAVE', 'PENDLE', 'ENA', 'MORPHO',
+
+    # MEMECOINS
+    'DOGE', 'PEPE', 'BONK', 'WIF', 'FLOKI', 'FARTCOIN',
+
+    # GAMING & NFTS
+    'GALA', 'ENJ', 'IMX', 'FLOW',
+
+    # AI & EMERGING
+    'TAO', 'WLD', 'VIRTUAL', 'HYPE',
+
+    # SPECIALIZED
+    'DYDX', 'PYTH', 'JUP', 'SPX', 'ETHFI', 'XTZ', 'PUMP', 'S', 'TRX'
+]
 
 # Data configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -147,12 +95,6 @@ Z_SCORE_VELOCITY_WINDOW = 288  # Periods to calculate velocity (24 hours on 5m)
 Z_SCORE_VELOCITY_THRESHOLD = 0.3  # Minimum velocity for momentum signal
 Z_SCORE_VELOCITY_DISPLAY_MULTIPLIER = 100  # Scale velocity for display (100x)
 
-# Z-Score Acceleration (Rate of change in velocity) - DISABLED FOR STAT-ARB
-# Third derivative over short windows = noise. Renaissance avoided this.
-Z_SCORE_ACCELERATION_ENABLED = False  # DISABLED - too noisy for stat-arb
-Z_SCORE_ACCELERATION_WINDOW = 12  # Periods to calculate acceleration (1 hour on 5m)
-Z_SCORE_ACCELERATION_THRESHOLD = 0.1  # Minimum acceleration for early entry
-Z_SCORE_ACCELERATION_DISPLAY_MULTIPLIER = 1000  # Scale acceleration for display (1000x)
 
 # Predictive Signal Classification
 PREDICTIVE_SIGNAL_ENABLED = True
@@ -161,31 +103,27 @@ PREDICTIVE_MOMENTUM_EXHAUSTION_Z = 3.0  # Z-score threshold for exhaustion
 PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD = -0.2  # Velocity turning negative = reversal
 
 # ============================================================================
-# AGGREGATED DERIVATIVES SIGNALS - COINGLASS (10+ EXCHANGES)
+# BINANCE FUTURES DERIVATIVES SIGNALS (PUBLIC API - NO AUTH REQUIRED)
 # ============================================================================
 
-# Funding Rate (Volume-weighted across all exchanges)
-FUNDING_RATE_ENABLED = False  # Disabled - API rate limits
+# Funding Rate (8h intervals on Binance)
+FUNDING_RATE_ENABLED = True  # FREE - Binance public API
 FUNDING_RATE_EXTREME_THRESHOLD = 0.15  # 0.15% = extreme overleveraged
 FUNDING_RATE_MULTIPLIER = 1.25  # 25% boost for extreme funding
 
-# Open Interest (Aggregated total OI)
-OI_ENABLED = False  # Disabled - API rate limits
+# Open Interest (Binance Futures OI in USD)
+OI_ENABLED = True  # FREE - Binance public API
 OI_THRESHOLD_USD = 100_000_000  # $100M minimum for liquidity filter
 
-# Liquidations (Cascade detection)
-LIQUIDATIONS_ENABLED = False  # Disabled - API rate limits
-LIQUIDATION_THRESHOLD_USD = 10_000_000  # $10M in 1h = cascade
-LIQUIDATION_MULTIPLIER = 1.3  # 30% boost for liquidation events
 
-# Long/Short Ratio (Aggregated positioning)
-LONG_SHORT_RATIO_ENABLED = False  # Disabled - API rate limits
+# Long/Short Ratio (Top trader positions on Binance)
+LONG_SHORT_RATIO_ENABLED = True  # FREE - Binance public API
 LS_RATIO_EXTREME_LONG = 1.8  # >1.8 = overleveraged longs (bearish)
 LS_RATIO_EXTREME_SHORT = 0.5  # <0.5 = overleveraged shorts (bullish)
 LS_RATIO_MULTIPLIER = 1.2  # 20% boost for extreme positioning
 
-# NOTE: Coinglass free API has rate limits. Enable these when you have API access.
-# Alternative: Use paid Coinglass API key or implement multi-exchange fetching yourself.
+# NOTE: Binance Futures = 40%+ of crypto derivatives market (sufficient for stat-arb)
+# All endpoints are PUBLIC - no API key required, no rate limit issues
 
 # Volume/Market Cap Configuration
 VOLUME_MCAP_NORMALIZATION = 'log'  # 'log' or 'minmax' normalization
@@ -195,34 +133,106 @@ CMC_API_KEY = "1f95581d-5beb-4bf5-985e-cb8fac961084"
 CMC_BASE_URL = "https://pro-api.coinmarketcap.com/v1"
 USE_REAL_MARKET_CAP = True  # Set to False to use proxy method
 
+def download_derivatives_history():
+    """Download historical derivatives data (funding rate, OI, long/short ratio) for all coins"""
+    if not DOWNLOAD_DERIVATIVES_HISTORY:
+        print("Derivatives history download disabled in configuration")
+        return False
+
+    print("\n" + "=" * 60)
+    print("DERIVATIVES HISTORICAL DATA DOWNLOAD")
+    print("=" * 60)
+
+    success = True
+
+    try:
+        from binance_futures_client import BinanceFuturesClient
+        import time
+
+        client = BinanceFuturesClient()
+
+        print(f"Downloading {DERIVATIVES_DOWNLOAD_DAYS} days of derivatives data for {len(COINS)} coins...")
+        print(f"Period: {DERIVATIVES_DOWNLOAD_PERIOD} (funding=8h, OI/LS={DERIVATIVES_DOWNLOAD_PERIOD})")
+
+        start_time = time.time()
+        downloaded_count = 0
+        failed_count = 0
+
+        for coin in COINS:
+            try:
+                # Get all derivatives history
+                history = client.get_derivatives_history_days(
+                    coin,
+                    days=DERIVATIVES_DOWNLOAD_DAYS,
+                    period=DERIVATIVES_DOWNLOAD_PERIOD
+                )
+
+                # Save to parquet files
+                if history['funding_rate'] is not None:
+                    history['funding_rate'].to_parquet(f'{DATA_FOLDER}/{coin}_funding_{DERIVATIVES_DOWNLOAD_DAYS}d.parquet')
+
+                if history['open_interest'] is not None:
+                    history['open_interest'].to_parquet(f'{DATA_FOLDER}/{coin}_oi_{DERIVATIVES_DOWNLOAD_PERIOD}_{DERIVATIVES_DOWNLOAD_DAYS}d.parquet')
+
+                if history['long_short_ratio'] is not None:
+                    history['long_short_ratio'].to_parquet(f'{DATA_FOLDER}/{coin}_ls_{DERIVATIVES_DOWNLOAD_PERIOD}_{DERIVATIVES_DOWNLOAD_DAYS}d.parquet')
+
+                downloaded_count += 1
+
+            except Exception as e:
+                print(f"Failed to download derivatives for {coin}: {e}")
+                failed_count += 1
+                continue
+
+        elapsed = time.time() - start_time
+
+        print(f"\nDerivatives download completed in {elapsed:.1f}s")
+        print(f"Success: {downloaded_count}/{len(COINS)} coins")
+
+        if failed_count > 0:
+            print(f"Failed: {failed_count} coins")
+            success = False
+
+    except Exception as e:
+        print(f"Derivatives download failed: {e}")
+        success = False
+
+    return success
+
+
 def run_data_download():
     """Download and update all required data"""
     if not ENABLE_DATA_DOWNLOAD:
         print("Data download disabled in configuration")
         return False
-        
+
     print("=" * 60)
     print("DATA DOWNLOAD SYSTEM")
     print("=" * 60)
-    
+
     success = True
-    
+
     try:
         from binance_downloader import BinanceDataDownloader
         import time
-        
-        # Download outlier detection data
-        print(f"Downloading {DATA_DOWNLOAD_DAYS} days of data for {len(DOWNLOAD_INTERVALS)} timeframes: {DOWNLOAD_INTERVALS}...")
+
+        # Download OHLCV data
+        print(f"Downloading {DATA_DOWNLOAD_DAYS} days of OHLCV data for {len(DOWNLOAD_INTERVALS)} timeframes: {DOWNLOAD_INTERVALS}...")
         start_time = time.time()
         downloader = BinanceDataDownloader(DATA_FOLDER)
         downloader.download_all_coins(days_back=DATA_DOWNLOAD_DAYS, intervals=DOWNLOAD_INTERVALS)
         elapsed = time.time() - start_time
-        print(f"Data download completed in {elapsed:.1f}s")
-            
+        print(f"OHLCV download completed in {elapsed:.1f}s")
+
+        # Download derivatives historical data
+        if DOWNLOAD_DERIVATIVES_HISTORY:
+            derivatives_success = download_derivatives_history()
+            success = success and derivatives_success
+
     except Exception as e:
         print(f"Data download failed: {e}")
         success = False
-        
+
     return success
 
 
@@ -248,19 +258,23 @@ def run_outlier_analysis():
         if not all_scores.empty:
             print(f"\nAnalyzed {len(all_scores)} coins in {elapsed:.2f}s")
             print(f"\n=== TOP {min(MAX_OUTLIER_DISPLAY, len(all_scores))} OUTLIERS WITH PREDICTIVE SIGNALS ===")
-            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'Z-Score':<10} {'Vel':<8} {'Accel':<8} {'Score':<8} {'HL(h)':<6}")
-            print("-" * 70)
+            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'Z-Score':<10} {'Vel':<8} {'Score':<8} {'HL(h)':<6} {'VolZ':<6} {'FR%':<8} {'LS':<6} {'OI1h%':<8} {'OI24h%':<9}")
+            print("-" * 115)
 
             display_count = min(MAX_OUTLIER_DISPLAY, len(all_scores))
             for idx, (_, row) in enumerate(all_scores.head(display_count).iterrows(), 1):
                 z_score = row.get('z_score', 0)
                 z_velocity = row.get('z_velocity', 0) * Z_SCORE_VELOCITY_DISPLAY_MULTIPLIER
-                z_accel = row.get('z_accel', 0) * Z_SCORE_ACCELERATION_DISPLAY_MULTIPLIER
                 score = row.get('relative_score', 0)
                 half_life = row.get('half_life', 999)
+                vol_surge_z = row.get('volume_surge_z', 0)
+                funding_rate = row.get('funding_rate', 0)
+                ls_ratio = row.get('long_short_ratio', 0)
+                oi_1h = row.get('oi_change_1h', 0)
+                oi_24h = row.get('oi_change_24h', 0)
 
-                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {z_velocity:<8.2f} {z_accel:<8.2f} {score:<8.2f} {half_life:<6.1f}")
-                
+                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {z_velocity:<8.2f} {score:<8.2f} {half_life:<6.1f} {vol_surge_z:<6.1f} {funding_rate:<8.3f} {ls_ratio:<6.2f} {oi_1h:<8.1f} {oi_24h:<9.1f}")
+
             return {'total_coins': len(all_scores), 'top_outliers': all_scores.head(10), 'execution_time': elapsed}
         else:
             print("No outlier data available")

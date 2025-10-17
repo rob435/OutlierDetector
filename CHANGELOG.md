@@ -25,10 +25,8 @@ Format: Date, change description, rationale, impact
   - **Rationale**: Need sufficient history for 14-day z-score calculation + buffer for half-life
   - **Impact**: Larger initial download, but necessary for proper statistical analysis
 
-### Disabled
-- **Z_SCORE_ACCELERATION_ENABLED**: True → False
-  - **Rationale**: Third derivative over short windows = pure noise with no predictive value. Jim Simons avoided higher-order derivatives.
-  - **Impact**: Removes noisy signal that was likely causing false entries
+- **OI** WE ADDED OI CHANGE 1 HOUR AND 24 HOUR
+- **VOLZ** ADDED Volume Z SCORE
 
 ### Strategy Decision
 - **Confirmed stat-arb approach** (mean reversion, NOT momentum)
@@ -36,16 +34,8 @@ Format: Date, change description, rationale, impact
   - Hold for days/weeks until reversion
   - Target 55-60% win rate with asymmetric payoffs
 
----
 
-## [Previous - Before Oct 2025]
 
-### Initial System
-- 24-hour z-score window
-- 2-hour velocity window
-- 1-hour acceleration window
-- MTF confirmation (1h/4h/1d)
-- Half-life calculation for position sizing
-- Volume surge detection
 
-**Note**: This configuration was more suitable for HFT/microstructure trading, not stat-arb
+
+

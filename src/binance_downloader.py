@@ -86,8 +86,6 @@ class BinanceDataDownloader:
             all_klines.extend(klines)
             current_start = current_end
 
-            time.sleep(0.1)
-
         if not all_klines:
             logger.error(f"No data downloaded for {symbol} ({interval})")
             return False
@@ -137,12 +135,8 @@ class BinanceDataDownloader:
                     coin_success = False
                     failed_downloads += 1
 
-                time.sleep(0.2)
-
             if coin_success:
                 successful_downloads += 1
-
-            time.sleep(0.3)
 
         logger.info(f"Download completed. Successful coins: {successful_downloads}, Failed operations: {failed_downloads}")
 
