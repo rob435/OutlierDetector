@@ -7,16 +7,20 @@ import os
 
 from main import (
     COINS, DATA_FOLDER, Z_SCORE_WINDOW, PRICE_CHANGE_PERIOD,
-    PRIMARY_TIMEFRAME, MULTI_TIMEFRAMES, MULTI_TIMEFRAMES_ADVANCED, MTF_REQUIRE_ALIGNMENT,
+    PRIMARY_TIMEFRAME, MULTI_TIMEFRAMES_ADVANCED, MTF_REQUIRE_ALIGNMENT,
     HALF_LIFE_ENABLED, HALF_LIFE_MIN_PERIODS, VOLUME_SURGE_THRESHOLD, VOLUME_SURGE_MULTIPLIER,
     USE_MODIFIED_ZSCORE, MAD_SCALE_FACTOR, USE_REAL_MARKET_CAP, VOLUME_MCAP_NORMALIZATION,
-    MTF_WEIGHTS,
-    FUNDING_RATE_ENABLED, FUNDING_RATE_THRESHOLD, FUNDING_RATE_MULTIPLIER,
-    OI_CHANGE_ENABLED, PERP_SPOT_BASIS_ENABLED, PERP_SPOT_THRESHOLD, PERP_SPOT_PENALTY,
-    ORDER_BOOK_ENABLED, ORDER_BOOK_DEPTH_LEVELS, BID_ASK_IMBALANCE_THRESHOLD, ORDER_BOOK_MULTIPLIER
+    FUNDING_RATE_ENABLED, FUNDING_RATE_EXTREME_THRESHOLD, FUNDING_RATE_MULTIPLIER,
+    OI_ENABLED, OI_THRESHOLD_USD,
+    LIQUIDATIONS_ENABLED, LIQUIDATION_THRESHOLD_USD, LIQUIDATION_MULTIPLIER,
+    LONG_SHORT_RATIO_ENABLED, LS_RATIO_EXTREME_LONG, LS_RATIO_EXTREME_SHORT, LS_RATIO_MULTIPLIER,
+    Z_SCORE_VELOCITY_ENABLED, Z_SCORE_VELOCITY_WINDOW, Z_SCORE_VELOCITY_THRESHOLD,
+    Z_SCORE_ACCELERATION_ENABLED, Z_SCORE_ACCELERATION_WINDOW, Z_SCORE_ACCELERATION_THRESHOLD,
+    PREDICTIVE_SIGNAL_ENABLED, PREDICTIVE_EARLY_ENTRY_Z, PREDICTIVE_MOMENTUM_EXHAUSTION_Z,
+    PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD
 )
 from coinmarketcap_client import CoinMarketCapClient
-from binance_derivatives import BinanceDerivatives
+from binance_derivatives import AggregatedDerivativesClient
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -25,12 +29,11 @@ class OutlierDetector:
     def __init__(self):
         self.data_folder = DATA_FOLDER
         self.primary_timeframe = PRIMARY_TIMEFRAME
-        self.multi_timeframes = MULTI_TIMEFRAMES
         self.z_score_window = Z_SCORE_WINDOW
         self.price_change_period = PRICE_CHANGE_PERIOD
         self.use_real_market_cap = USE_REAL_MARKET_CAP
         self.volume_mcap_normalization = VOLUME_MCAP_NORMALIZATION
-        
+
         # Core features
         self.half_life_enabled = HALF_LIFE_ENABLED
         self.half_life_min_periods = HALF_LIFE_MIN_PERIODS
@@ -38,31 +41,39 @@ class OutlierDetector:
         self.volume_surge_multiplier = VOLUME_SURGE_MULTIPLIER
         self.use_modified_zscore = USE_MODIFIED_ZSCORE
         self.mad_scale_factor = MAD_SCALE_FACTOR
-        
-        # MTF settings
+
+        # Advanced MTF settings
         self.multi_timeframes_advanced = MULTI_TIMEFRAMES_ADVANCED
         self.mtf_require_alignment = MTF_REQUIRE_ALIGNMENT
-        
-        # Derivatives signals
+
+        # Aggregated derivatives signals
         self.funding_rate_enabled = FUNDING_RATE_ENABLED
-        self.funding_rate_threshold = FUNDING_RATE_THRESHOLD
+        self.funding_rate_extreme_threshold = FUNDING_RATE_EXTREME_THRESHOLD
         self.funding_rate_multiplier = FUNDING_RATE_MULTIPLIER
-        self.oi_change_enabled = OI_CHANGE_ENABLED
-        self.perp_spot_basis_enabled = PERP_SPOT_BASIS_ENABLED
-        self.perp_spot_threshold = PERP_SPOT_THRESHOLD
-        self.perp_spot_penalty = PERP_SPOT_PENALTY
-        
-        # Order book signals
-        self.order_book_enabled = ORDER_BOOK_ENABLED
-        self.order_book_depth_levels = ORDER_BOOK_DEPTH_LEVELS
-        self.bid_ask_imbalance_threshold = BID_ASK_IMBALANCE_THRESHOLD
-        self.order_book_multiplier = ORDER_BOOK_MULTIPLIER
-        
-        # MTF weights
-        self.mtf_weights = MTF_WEIGHTS
-        
-        # Initialize derivatives client
-        self.derivatives_client = BinanceDerivatives()
+        self.oi_enabled = OI_ENABLED
+        self.oi_threshold_usd = OI_THRESHOLD_USD
+        self.liquidations_enabled = LIQUIDATIONS_ENABLED
+        self.liquidation_threshold_usd = LIQUIDATION_THRESHOLD_USD
+        self.liquidation_multiplier = LIQUIDATION_MULTIPLIER
+        self.long_short_ratio_enabled = LONG_SHORT_RATIO_ENABLED
+        self.ls_ratio_extreme_long = LS_RATIO_EXTREME_LONG
+        self.ls_ratio_extreme_short = LS_RATIO_EXTREME_SHORT
+        self.ls_ratio_multiplier = LS_RATIO_MULTIPLIER
+
+        # Predictive Z-score settings
+        self.z_score_velocity_enabled = Z_SCORE_VELOCITY_ENABLED
+        self.z_score_velocity_window = Z_SCORE_VELOCITY_WINDOW
+        self.z_score_velocity_threshold = Z_SCORE_VELOCITY_THRESHOLD
+        self.z_score_acceleration_enabled = Z_SCORE_ACCELERATION_ENABLED
+        self.z_score_acceleration_window = Z_SCORE_ACCELERATION_WINDOW
+        self.z_score_acceleration_threshold = Z_SCORE_ACCELERATION_THRESHOLD
+        self.predictive_signal_enabled = PREDICTIVE_SIGNAL_ENABLED
+        self.predictive_early_entry_z = PREDICTIVE_EARLY_ENTRY_Z
+        self.predictive_momentum_exhaustion_z = PREDICTIVE_MOMENTUM_EXHAUSTION_Z
+        self.predictive_velocity_reversal_threshold = PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD
+
+        # Initialize aggregated derivatives client (Coinglass)
+        self.derivatives_client = AggregatedDerivativesClient()
         
         # Initialize CoinMarketCap client and fetch market cap data once
         if self.use_real_market_cap:
@@ -148,10 +159,6 @@ class OutlierDetector:
         price_change = close_prices.pct_change(periods=period) * 100
         return price_change.fillna(0)
     
-    def apply_ewma(self, series: pd.Series, alpha: float) -> pd.Series:
-        """Apply Exponentially Weighted Moving Average"""
-        return series.ewm(alpha=alpha, adjust=False).mean()
-    
     def get_market_cap(self, coin: str, close_prices: pd.Series, volumes: pd.Series) -> pd.Series:
         """Get market cap - either real from CMC or calculated proxy"""
         if self.use_real_market_cap and coin in self.market_caps and self.market_caps[coin] is not None:
@@ -236,7 +243,7 @@ class OutlierDetector:
                 return 999.0  # No mean reversion
             
             half_life_periods = -np.log(2) / np.log(1 + beta)
-            half_life_hours = half_life_periods / 60  # Convert 1m periods to hours
+            half_life_hours = half_life_periods / 12  # Convert 5m periods to hours (12 periods per hour)
             
             # Cap at reasonable values
             half_life_hours = np.clip(half_life_hours, 0.1, 999.0)
@@ -251,21 +258,133 @@ class OutlierDetector:
         """Calculate volume surge Z-score (abnormal volume detection)"""
         if len(volumes) < self.z_score_window:
             return 0.0
-        
+
         # Calculate rolling Z-score of volume
         volume_mean = volumes.rolling(window=self.z_score_window, min_periods=1).mean()
         volume_std = volumes.rolling(window=self.z_score_window, min_periods=1).std()
-        
+
         # Avoid division by zero
         volume_std = volume_std.fillna(1.0)
         volume_std = np.where(volume_std == 0, 1.0, volume_std)
-        
+
         volume_z_score = (volumes - volume_mean) / volume_std
-        
+
         # Get latest volume Z-score
         latest_volume_z = volume_z_score.iloc[-1] if len(volume_z_score) > 0 else 0
-        
+
         return latest_volume_z
+
+    def calculate_z_score_velocity(self, z_scores: pd.Series) -> pd.Series:
+        """Calculate Z-score velocity (rate of change) - PREDICTIVE SIGNAL"""
+        if not self.z_score_velocity_enabled or len(z_scores) < self.z_score_velocity_window:
+            return pd.Series(0, index=z_scores.index)
+
+        # Calculate rolling velocity (change per period)
+        velocity = z_scores.diff(self.z_score_velocity_window) / self.z_score_velocity_window
+
+        return velocity.fillna(0)
+
+    def calculate_z_score_acceleration(self, velocity: pd.Series) -> pd.Series:
+        """Calculate Z-score acceleration (rate of change of velocity) - EARLY MOMENTUM DETECTION"""
+        if not self.z_score_acceleration_enabled or len(velocity) < self.z_score_acceleration_window:
+            return pd.Series(0, index=velocity.index)
+
+        # Calculate rolling acceleration (change in velocity)
+        acceleration = velocity.diff(self.z_score_acceleration_window) / self.z_score_acceleration_window
+
+        return acceleration.fillna(0)
+
+    def classify_predictive_signal(self, z_score: float, velocity: float, acceleration: float,
+                                   volume_surge_z: float) -> Dict[str, any]:
+        """Classify predictive signal type - TRANSFORMS REACTIVE TO PREDICTIVE"""
+        if not self.predictive_signal_enabled:
+            return {
+                'signal': 'NEUTRAL',
+                'confidence': 0,
+                'action': 'HOLD',
+                'reason': 'Predictive signals disabled'
+            }
+
+        abs_z = abs(z_score)
+
+        # EARLY ENTRY: Z-score building + positive acceleration + volume confirmation
+        if (abs_z >= self.predictive_early_entry_z and
+            abs_z < self.predictive_momentum_exhaustion_z and
+            acceleration > self.z_score_acceleration_threshold):
+
+            confidence = min(abs(acceleration) / 0.5, 1.0)  # Scale 0-1
+
+            # Volume confirmation boosts confidence
+            if volume_surge_z > self.volume_surge_threshold:
+                confidence = min(confidence * 1.3, 1.0)
+
+            return {
+                'signal': 'EARLY_ENTRY',
+                'confidence': confidence,
+                'action': 'BUY' if z_score > 0 else 'SELL',
+                'reason': f'Momentum building (accel={acceleration:.3f})'
+            }
+
+        # MOMENTUM CONTINUATION: Strong Z-score + positive velocity + positive acceleration
+        elif (abs_z >= self.predictive_momentum_exhaustion_z * 0.7 and
+              velocity * np.sign(z_score) > self.z_score_velocity_threshold and
+              acceleration > 0):
+
+            confidence = min(abs(velocity) / 1.0, 1.0)
+
+            return {
+                'signal': 'MOMENTUM',
+                'confidence': confidence,
+                'action': 'HOLD' if z_score > 0 else 'HOLD',
+                'reason': f'Strong momentum (vel={velocity:.3f})'
+            }
+
+        # EXHAUSTION WARNING: Extreme Z-score + decelerating
+        elif (abs_z >= self.predictive_momentum_exhaustion_z and
+              acceleration < -self.z_score_acceleration_threshold):
+
+            confidence = min(abs(acceleration) / 0.5, 1.0)
+
+            return {
+                'signal': 'EXHAUSTION',
+                'confidence': confidence,
+                'action': 'EXIT',
+                'reason': f'Momentum dying (accel={acceleration:.3f})'
+            }
+
+        # REVERSAL: Velocity turning negative
+        elif velocity * np.sign(z_score) < self.predictive_velocity_reversal_threshold:
+
+            confidence = min(abs(velocity) / 0.5, 1.0)
+
+            return {
+                'signal': 'REVERSAL',
+                'confidence': confidence,
+                'action': 'EXIT',
+                'reason': f'Reversal detected (vel={velocity:.3f})'
+            }
+
+        # MEAN REVERSION SETUP: Extreme Z-score + negative velocity
+        elif (abs_z >= self.predictive_momentum_exhaustion_z and
+              velocity * np.sign(z_score) < 0):
+
+            confidence = min(abs(velocity) / 1.0, 1.0)
+
+            return {
+                'signal': 'MEAN_REVERT',
+                'confidence': confidence,
+                'action': 'FADE',
+                'reason': f'Mean reversion (vel={velocity:.3f})'
+            }
+
+        # NEUTRAL: No clear signal
+        else:
+            return {
+                'signal': 'NEUTRAL',
+                'confidence': 0,
+                'action': 'HOLD',
+                'reason': 'No strong signal'
+            }
     
     
     def calculate_relative_score(self, z_score: float) -> float:
@@ -341,118 +460,35 @@ class OutlierDetector:
             'timeframes': timeframe_signals
         }
     
-    def calculate_multi_timeframe_confirmation(self, coin: str, btc_prices_dict: Dict[str, pd.Series], btc_timestamps_dict: Dict[str, pd.Series]) -> float:
-        """Calculate multi-timeframe confirmation score"""
-        confirmation_scores = {}
-        
-        for timeframe in self.multi_timeframes:
-            try:
-                df = self.load_coin_data(coin, timeframe)
-                if df.empty:
-                    continue
-                
-                # Align with BTC data for this timeframe
-                coin_df = df.set_index('open_time')
-                btc_df_aligned = pd.DataFrame({
-                    'btc_close': btc_prices_dict[timeframe].values, 
-                    'timestamp': btc_timestamps_dict[timeframe].values
-                }).set_index('timestamp')
-                
-                merged = coin_df.join(btc_df_aligned, how='inner')
-                
-                if merged.empty:
-                    continue
-                
-                # Calculate Z-score for this timeframe
-                z_score = self.calculate_btc_relative_z_score(
-                    merged['close'], 
-                    merged['btc_close'], 
-                    int(self.z_score_window / (self._timeframe_to_minutes(timeframe) / self._timeframe_to_minutes(self.primary_timeframe)))
-                )
-                
-                # Get latest z-score
-                latest_z = z_score.iloc[-1] if len(z_score) > 0 else 0
-                
-                # Normalize to 0-1 where 1 = strong outlier signal
-                confirmation_score = np.clip(np.abs(latest_z) / 5.0, 0, 1)
-                confirmation_scores[timeframe] = confirmation_score
-                
-            except Exception as e:
-                logger.warning(f"Multi-timeframe analysis failed for {coin} on {timeframe}: {e}")
-                continue
-        
-        # Calculate weighted confirmation
-        weighted_confirmation = 0
-        total_weight = 0
-        for timeframe, score in confirmation_scores.items():
-            weight = self.mtf_weights.get(timeframe, 0)
-            weighted_confirmation += score * weight
-            total_weight += weight
-        
-        if total_weight > 0:
-            final_confirmation = weighted_confirmation / total_weight
-        else:
-            final_confirmation = 0
-        
-        return final_confirmation
-    
-    def _timeframe_to_minutes(self, timeframe: str) -> int:
-        """Convert timeframe string to minutes"""
-        unit = timeframe[-1]
-        value = int(timeframe[:-1])
-        
-        if unit == 'm':
-            return value
-        elif unit == 'h':
-            return value * 60
-        elif unit == 'd':
-            return value * 1440
-        else:
-            return 1
-    
-    def calculate_weighted_outlier_score(self, z_score: pd.Series, price_change: pd.Series, 
-                                       volume_mcap_normalized: pd.Series = None) -> pd.Series:
-        """Calculate weighted outlier score combining Z-score, price change, and volume/mcap ratio"""
-        # Normalize price change to similar scale as Z-score
-        price_change_abs = np.abs(price_change)
-        price_change_normalized = (price_change_abs - price_change_abs.rolling(window=self.z_score_window, min_periods=1).mean()) / price_change_abs.rolling(window=self.z_score_window, min_periods=1).std().fillna(1.0)
-        
-        # Calculate base weighted score
-        base_score = (self.z_score_weight * np.abs(z_score) + 
-                     self.price_change_weight * np.abs(price_change_normalized))
-        
-        if volume_mcap_normalized is not None:
-            # Add volume/mcap component as a multiplier (not additive)
-            # Higher volume/mcap ratio amplifies the signal
-            volume_multiplier = 1 + (self.volume_mcap_weight * volume_mcap_normalized)
-            weighted_score = base_score * volume_multiplier
-        else:
-            weighted_score = base_score
-        
-        return weighted_score
-    
     def detect_outliers_single_coin(self, coin: str) -> pd.DataFrame:
         """Detect outliers for a single coin"""
         df = self.load_coin_data(coin)
-        
+
         if df.empty:
             return pd.DataFrame()
-        
+
         # Calculate rolling Z-score for close prices
         z_score = self.calculate_rolling_z_score(df['close'], self.z_score_window)
-        
+
+        # Calculate predictive signals: velocity and acceleration
+        z_score_velocity = self.calculate_z_score_velocity(z_score)
+        z_score_acceleration = self.calculate_z_score_acceleration(z_score_velocity)
+
         # Calculate price change using configured period
         price_change = self.calculate_price_change(df['close'], self.price_change_period)
-        
+
         # Calculate volume/market cap components
         market_cap = self.get_market_cap(coin, df['close'], df['volume'])
         volume_mcap_ratio = self.calculate_volume_mcap_ratio(df['volume'], market_cap)
         volume_mcap_normalized = self.normalize_volume_mcap_ratio(volume_mcap_ratio, self.volume_mcap_normalization)
-        
+
+        # Calculate half-life
+        half_life = self.calculate_half_life(z_score)
+
         # Calculate relative score (-5 to 5)
         latest_z_score = z_score.iloc[-1] if not z_score.empty else 0
         relative_score = self.calculate_relative_score(latest_z_score)
-        
+
         # Create results dataframe
         results = pd.DataFrame({
             'timestamp': df['open_time'],
@@ -463,10 +499,13 @@ class OutlierDetector:
             'volume_mcap_ratio': volume_mcap_ratio,
             'volume_mcap_normalized': volume_mcap_normalized,
             'z_score': z_score,
+            'z_velocity': z_score_velocity,
+            'z_accel': z_score_acceleration,
             'price_change': price_change,
-            'relative_score': relative_score
+            'relative_score': relative_score,
+            'half_life': half_life
         })
-        
+
         return results
     
     def detect_outliers_single_coin_vs_btc(self, coin: str, btc_prices: pd.Series, btc_timestamps: pd.Series, 
@@ -492,7 +531,11 @@ class OutlierDetector:
         
         # Calculate BTC-relative Z-score
         z_score = self.calculate_btc_relative_z_score(merged['close'], merged['btc_close'], self.z_score_window)
-        
+
+        # Calculate predictive signals: velocity and acceleration
+        z_score_velocity = self.calculate_z_score_velocity(z_score)
+        z_score_acceleration = self.calculate_z_score_acceleration(z_score_velocity)
+
         # Calculate price change using configured period
         price_change = self.calculate_price_change(merged['close'], self.price_change_period)
         
@@ -506,52 +549,58 @@ class OutlierDetector:
         volume_surge_z = self.calculate_volume_surge_score(merged['volume'])
         advanced_mtf = self.calculate_advanced_mtf_confirmation(coin)
         
-        # Fetch derivatives data (live)
+        # Fetch aggregated derivatives data (Coinglass - 10+ exchanges)
         funding_rate = 0
-        funding_rate_z = 0
-        oi_change_pct = 0
-        oi_change_z = 0
-        perp_spot_basis = 0
-        bid_ask_imbalance = 0
-        
+        open_interest = 0
+        liquidation_total = 0
+        liquidation_ratio = 0
+        long_short_ratio = 0
+
         try:
-            # Funding rate
+            # Funding rate (volume-weighted across all exchanges)
             if self.funding_rate_enabled:
                 fr = self.derivatives_client.get_funding_rate(coin)
                 if fr is not None:
                     funding_rate = fr
-            
-            # Open interest (fetch current, calculate change later if we store historical)
-            if self.oi_change_enabled:
+
+            # Open interest (aggregated total)
+            if self.oi_enabled:
                 oi = self.derivatives_client.get_open_interest(coin)
-                # For now, we don't have historical OI, so oi_change = 0
-                # TODO: Store OI history for proper change calculation
-            
-            # Perp-spot basis
-            if self.perp_spot_basis_enabled:
-                basis = self.derivatives_client.get_perp_spot_basis(coin)
-                if basis is not None:
-                    perp_spot_basis = basis
-            
-            # Order book imbalance
-            if self.order_book_enabled:
-                ob = self.derivatives_client.get_order_book_depth(coin, self.order_book_depth_levels)
-                if ob is not None:
-                    bid_ask_imbalance = ob['imbalance']
-        
+                if oi is not None:
+                    open_interest = oi
+
+            # Liquidations (1h window)
+            if self.liquidations_enabled:
+                liq = self.derivatives_client.get_liquidations(coin, '1h')
+                if liq is not None:
+                    liquidation_total = liq['total_liq']
+                    liquidation_ratio = liq['liq_ratio']
+
+            # Long/Short ratio (aggregated positioning)
+            if self.long_short_ratio_enabled:
+                ls_ratio = self.derivatives_client.get_long_short_ratio(coin)
+                if ls_ratio is not None:
+                    long_short_ratio = ls_ratio
+
         except Exception as e:
-            logger.warning(f"Failed to fetch derivatives data for {coin}: {e}")
-        
-        # Calculate multi-timeframe confirmation if data available (legacy)
-        mtf_confirmation = 0.0
-        if btc_prices_dict and btc_timestamps_dict:
-            mtf_confirmation = self.calculate_multi_timeframe_confirmation(coin, btc_prices_dict, btc_timestamps_dict)
-        
+            logger.warning(f"Failed to fetch aggregated derivatives data for {coin}: {e}")
+
         # ============================================================================
-        # SCORING - ORTHOGONAL SIGNALS
+        # SCORING - ORTHOGONAL SIGNALS + PREDICTIVE CLASSIFICATION
         # ============================================================================
-        
+
         latest_z_score = z_score.iloc[-1] if not z_score.empty else 0
+        latest_velocity = z_score_velocity.iloc[-1] if not z_score_velocity.empty else 0
+        latest_acceleration = z_score_acceleration.iloc[-1] if not z_score_acceleration.empty else 0
+
+        # Classify predictive signal
+        predictive_signal = self.classify_predictive_signal(
+            latest_z_score,
+            latest_velocity,
+            latest_acceleration,
+            volume_surge_z
+        )
+
         base_score = self.calculate_relative_score(latest_z_score)
         
         # PRIMARY SIGNAL: BTC-relative Z-score
@@ -560,33 +609,41 @@ class OutlierDetector:
         # VOLUME CONFIRMATION: Only boost if significant volume surge
         if volume_surge_z > self.volume_surge_threshold:
             final_score *= self.volume_surge_multiplier
-        
+
         # MTF CONFIRMATION: Boost if multiple timeframes aligned
         mtf_aligned = advanced_mtf['aligned']
         if mtf_aligned >= self.mtf_require_alignment:
             final_score *= 1.2  # 20% boost for structural confirmation
-        
-        # FUNDING RATE: Extreme funding = contrarian reversal signal
-        if self.funding_rate_enabled and abs(funding_rate) > 0.1:  # >0.1% is significant
-            # Positive funding = longs paying shorts = overleveraged longs = bearish
-            # Negative funding = shorts paying longs = bullish
-            # If Z-score and funding are opposite signs = reversal confirmation
-            if (latest_z_score > 0 and funding_rate > 0.2) or (latest_z_score < 0 and funding_rate < -0.1):
+
+        # AGGREGATED FUNDING RATE: Extreme funding = overleveraged positions
+        if self.funding_rate_enabled and abs(funding_rate) > self.funding_rate_extreme_threshold:
+            # Extreme positive funding = overleveraged longs = bearish reversal
+            # Extreme negative funding = overleveraged shorts = bullish reversal
+            if (latest_z_score > 0 and funding_rate > self.funding_rate_extreme_threshold) or \
+               (latest_z_score < 0 and funding_rate < -self.funding_rate_extreme_threshold):
                 final_score *= self.funding_rate_multiplier
-        
-        # PERP-SPOT BASIS: Excessive premium/discount = speculation warning
-        if self.perp_spot_basis_enabled and abs(perp_spot_basis) > self.perp_spot_threshold:
-            # High premium = excessive speculation = reduce score
-            final_score *= self.perp_spot_penalty
-        
-        # ORDER BOOK IMBALANCE: Strong directional bias
-        if self.order_book_enabled and abs(bid_ask_imbalance) > self.bid_ask_imbalance_threshold:
-            # Imbalance in same direction as Z-score = confirmation
-            if (latest_z_score > 0 and bid_ask_imbalance > 0) or (latest_z_score < 0 and bid_ask_imbalance < 0):
-                final_score *= self.order_book_multiplier
+
+        # LIQUIDATION CASCADE: High liquidations = forced selling/buying pressure
+        if self.liquidations_enabled and liquidation_total > self.liquidation_threshold_usd:
+            # Major liquidations indicate forced position closure = continuation signal
+            final_score *= self.liquidation_multiplier
+
+        # LONG/SHORT RATIO: Aggregated positioning across exchanges
+        if self.long_short_ratio_enabled:
+            # Overleveraged longs = bearish reversal signal
+            if long_short_ratio > self.ls_ratio_extreme_long and latest_z_score > 0:
+                final_score *= self.ls_ratio_multiplier
+            # Overleveraged shorts = bullish reversal signal
+            elif long_short_ratio < self.ls_ratio_extreme_short and latest_z_score < 0:
+                final_score *= self.ls_ratio_multiplier
+
+        # OPEN INTEREST FILTER: Only trade liquid markets
+        if self.oi_enabled and open_interest > 0 and open_interest < self.oi_threshold_usd:
+            # Low liquidity = reduce confidence
+            final_score *= 0.8
         
         final_score = np.clip(final_score, -10, 10)
-        
+
         # Create results dataframe
         results = pd.DataFrame({
             'timestamp': merged.index,
@@ -599,63 +656,60 @@ class OutlierDetector:
             'volume_mcap_ratio': volume_mcap_ratio,
             'volume_mcap_normalized': volume_mcap_normalized,
             'z_score': z_score,
+            'z_velocity': z_score_velocity,
+            'z_accel': z_score_acceleration,
             'price_change': price_change,
             'relative_score': final_score,
             'half_life': half_life,
             'volume_surge_z': volume_surge_z,
             'mtf_aligned': mtf_aligned,
             'funding_rate': funding_rate,
-            'perp_spot_basis': perp_spot_basis,
-            'bid_ask_imbalance': bid_ask_imbalance
+            'open_interest': open_interest,
+            'liquidation_total': liquidation_total,
+            'liquidation_ratio': liquidation_ratio,
+            'long_short_ratio': long_short_ratio,
+            'pred_signal': predictive_signal['signal'],
+            'pred_action': predictive_signal['action'],
+            'pred_confidence': predictive_signal['confidence']
         })
         
         return results.reset_index(drop=True)
     
     def detect_outliers_all_coins(self) -> pd.DataFrame:
-        """Detect outliers for all coins relative to BTC with multi-timeframe analysis"""
+        """Detect outliers for all coins relative to BTC"""
         all_results = []
-        
-        # Load BTC data for all timeframes
-        logger.info("Loading BTC data as reference for all timeframes")
-        btc_prices_dict = {}
-        btc_timestamps_dict = {}
-        
-        for timeframe in self.multi_timeframes:
-            btc_df = self.load_coin_data('BTC', timeframe)
-            if not btc_df.empty:
-                btc_prices_dict[timeframe] = btc_df['close']
-                btc_timestamps_dict[timeframe] = btc_df['open_time']
-        
-        # Check if primary timeframe loaded
-        if self.primary_timeframe not in btc_prices_dict or btc_prices_dict[self.primary_timeframe].empty:
+
+        # Load BTC data for primary timeframe
+        logger.info("Loading BTC data as reference")
+        btc_df = self.load_coin_data('BTC', self.primary_timeframe)
+
+        if btc_df.empty:
             logger.error("Cannot load BTC data for primary timeframe - required as reference")
             return pd.DataFrame()
-        
-        btc_prices = btc_prices_dict[self.primary_timeframe]
-        btc_timestamps = btc_timestamps_dict[self.primary_timeframe]
-        
+
+        btc_prices = btc_df['close']
+        btc_timestamps = btc_df['open_time']
+
         for coin in COINS:
             logger.info(f"Processing outlier detection for {coin}")
-            
+
             if coin == 'BTC':
                 coin_results = self.detect_outliers_single_coin(coin)
             else:
                 coin_results = self.detect_outliers_single_coin_vs_btc(
-                    coin, btc_prices, btc_timestamps, 
-                    btc_prices_dict, btc_timestamps_dict,
-                    None
+                    coin, btc_prices, btc_timestamps, None, None, None
                 )
-            
+
             if not coin_results.empty:
                 all_results.append(coin_results)
-        
+
         if not all_results:
             logger.warning("No outlier results generated")
             return pd.DataFrame()
-        
+
         combined_results = pd.concat(all_results, ignore_index=True)
         combined_results = combined_results.sort_values(['timestamp', 'relative_score'], ascending=[True, False])
-        
+
         logger.info(f"Outlier detection completed for {len(COINS)} coins")
         return combined_results
     

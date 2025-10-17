@@ -9,9 +9,9 @@ ENABLE_DATA_DOWNLOAD = True  # Enable automatic data downloading (set to False f
 ENABLE_OUTLIER_DETECTION = True  # Enable outlier detection system
 ENABLE_FULL_SYSTEM_STATUS = True  # Enable full system status reporting
 
-# Data Download Configuration
-DATA_DOWNLOAD_DAYS = 3  # Days of data to download for outlier detection
-FORCE_DATA_REFRESH = False  # Force re-download of existing data
+# Data Download Configuration - STAT-ARB REQUIRES MORE HISTORY
+DATA_DOWNLOAD_DAYS = 30  # Days of data to download for 14-day z-score window + buffer
+FORCE_DATA_REFRESH = True  # Force re-download of existing data
 DOWNLOAD_INTERVALS = ["5m", "15m", "1h", "4h", "1d"]  # Timeframes to download
 
 # System Display Configuration
@@ -19,20 +19,8 @@ MAX_OUTLIER_DISPLAY = 999  # Maximum outliers to display in ranking (999 = all c
 DISPLAY_SYSTEM_METRICS = True  # Show system performance metrics
 
 # Advanced System Configuration
-PARALLEL_PROCESSING = True  # Enable parallel processing where available
 VERBOSE_OUTPUT = False  # Enable detailed logging output
 SYSTEM_HEALTH_CHECK = True  # Enable system health monitoring
-
-# Advanced Features for Improved Accuracy
-ENABLE_SENTIMENT_ANALYSIS = True  # Integrate social media sentiment data
-ENABLE_ONCHAIN_METRICS = True  # Include on-chain data (active addresses, transactions)
-ENABLE_FUNDING_RATE_ANALYSIS = True  # Analyze perpetual funding rates
-ENABLE_ORDER_BOOK_DEPTH = True  # Monitor order book liquidity and depth
-ENABLE_WHALE_TRACKING = True  # Track large holder movements
-ENABLE_CORRELATION_CLUSTERING = True  # Group correlated assets for better outlier detection
-ENABLE_MULTI_TIMEFRAME_ANALYSIS = True  # Analyze multiple timeframes simultaneously
-ENABLE_VOLATILITY_REGIME_DETECTION = True  # Detect high/low volatility regimes
-ENABLE_LIQUIDITY_SCORING = True  # Score coins by liquidity quality
 
 # Coin Configuration
 COINS_DATA = {
@@ -122,16 +110,11 @@ COINS = list(COINS_DATA.keys())
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_FOLDER = os.path.join(BASE_DIR, "data")
 PRIMARY_TIMEFRAME = "5m"  # Primary timeframe for analysis
-MULTI_TIMEFRAMES = ["5m", "15m", "1h"]  # Legacy multiple timeframes for confirmation
-MULTI_TIMEFRAMES_ADVANCED = ["1h", "4h", "1d"]  # Advanced MTF for structural confirmation
 
-# Outlier Detection Configuration
-Z_SCORE_WINDOW = 288  # Number of bars for Z-score calculation (24 hours of 5m bars)
-PRICE_CHANGE_PERIOD = 12  # Number of bars for price change calculation (1 hour of 5m bars)
-EWMA_ALPHA = 0.005  # EWMA smoothing factor
-Z_SCORE_WEIGHT = 0.50  # Weight for Z-score in final outlier score
-PRICE_CHANGE_WEIGHT = 0.05  # Weight for price change in final outlier score
-VOLUME_MCAP_WEIGHT = 0.15  # Weight for volume/market cap ratio in final outlier score
+# Outlier Detection Configuration - STATISTICAL ARBITRAGE APPROACH
+# Renaissance-style: Longer lookback windows to capture genuine mispricings, not noise
+Z_SCORE_WINDOW = 4032  # Number of bars for Z-score calculation (14 days of 5m bars)
+PRICE_CHANGE_PERIOD = 288  # Number of bars for price change calculation (24 hours of 5m bars)
 
 # ============================================================================
 # CORE FEATURES - ORTHOGONAL SIGNALS
@@ -153,42 +136,59 @@ HALF_LIFE_MIN_PERIODS = 100  # Minimum data for reliable estimate
 MULTI_TIMEFRAMES_ADVANCED = ["1h", "4h", "1d"]
 MTF_REQUIRE_ALIGNMENT = 2  # Minimum aligned timeframes for confirmation
 
-# Derivatives Signals (TIER 1 - Easy API access, strong signals)
-FUNDING_RATE_ENABLED = True  # Perpetual funding rate analysis
-FUNDING_RATE_THRESHOLD = 2.0  # Z-score threshold for abnormal funding
-FUNDING_RATE_MULTIPLIER = 1.2  # 20% boost for extreme funding (reversal signal)
+# ============================================================================
+# PREDICTIVE Z-SCORE SIGNALS - TRANSFORM FROM REACTIVE TO PREDICTIVE
+# ============================================================================
 
-OI_CHANGE_ENABLED = True  # Open Interest change detection
-OI_CHANGE_WINDOW = 12  # Periods to measure OI change (1 hour on 5m)
-OI_CHANGE_THRESHOLD = 2.0  # Z-score threshold for abnormal OI change
-OI_CHANGE_MULTIPLIER = 1.15  # 15% boost for significant position building
+# Z-Score Velocity (Rate of change in Z-score) - STAT-ARB CONFIGURATION
+# Measure z-score momentum over meaningful timeframes, not microstructure noise
+Z_SCORE_VELOCITY_ENABLED = True
+Z_SCORE_VELOCITY_WINDOW = 288  # Periods to calculate velocity (24 hours on 5m)
+Z_SCORE_VELOCITY_THRESHOLD = 0.3  # Minimum velocity for momentum signal
+Z_SCORE_VELOCITY_DISPLAY_MULTIPLIER = 100  # Scale velocity for display (100x)
 
-PERP_SPOT_BASIS_ENABLED = True  # Perpetual-Spot premium analysis
-PERP_SPOT_THRESHOLD = 0.5  # % threshold for excessive premium/discount
-PERP_SPOT_PENALTY = 0.9  # 10% penalty for excessive speculation
+# Z-Score Acceleration (Rate of change in velocity) - DISABLED FOR STAT-ARB
+# Third derivative over short windows = noise. Renaissance avoided this.
+Z_SCORE_ACCELERATION_ENABLED = False  # DISABLED - too noisy for stat-arb
+Z_SCORE_ACCELERATION_WINDOW = 12  # Periods to calculate acceleration (1 hour on 5m)
+Z_SCORE_ACCELERATION_THRESHOLD = 0.1  # Minimum acceleration for early entry
+Z_SCORE_ACCELERATION_DISPLAY_MULTIPLIER = 1000  # Scale acceleration for display (1000x)
 
-# Order Book Signals (Market microstructure)
-ORDER_BOOK_ENABLED = True  # Order book imbalance analysis
-ORDER_BOOK_DEPTH_LEVELS = 10  # Number of order book levels to analyze
-BID_ASK_IMBALANCE_THRESHOLD = 0.3  # Imbalance threshold (0.3 = 30% skew)
-ORDER_BOOK_MULTIPLIER = 1.1  # 10% boost for strong imbalance
+# Predictive Signal Classification
+PREDICTIVE_SIGNAL_ENABLED = True
+PREDICTIVE_EARLY_ENTRY_Z = 1.5  # Z-score threshold for early entry (before peak)
+PREDICTIVE_MOMENTUM_EXHAUSTION_Z = 3.0  # Z-score threshold for exhaustion
+PREDICTIVE_VELOCITY_REVERSAL_THRESHOLD = -0.2  # Velocity turning negative = reversal
 
-# Legacy MTF (keep for backwards compatibility but minimal weight)
-MTF_CONFIRMATION_WEIGHT_1m = 0.60
-MTF_CONFIRMATION_WEIGHT_5m = 0.30
-MTF_CONFIRMATION_WEIGHT_15m = 0.10
-MTF_MINIMUM_CONFIRMATION = 0.5
-MTF_WEIGHTS = {
-    '1m': MTF_CONFIRMATION_WEIGHT_1m,
-    '5m': MTF_CONFIRMATION_WEIGHT_5m,
-    '15m': MTF_CONFIRMATION_WEIGHT_15m
-}
+# ============================================================================
+# AGGREGATED DERIVATIVES SIGNALS - COINGLASS (10+ EXCHANGES)
+# ============================================================================
 
+# Funding Rate (Volume-weighted across all exchanges)
+FUNDING_RATE_ENABLED = False  # Disabled - API rate limits
+FUNDING_RATE_EXTREME_THRESHOLD = 0.15  # 0.15% = extreme overleveraged
+FUNDING_RATE_MULTIPLIER = 1.25  # 25% boost for extreme funding
+
+# Open Interest (Aggregated total OI)
+OI_ENABLED = False  # Disabled - API rate limits
+OI_THRESHOLD_USD = 100_000_000  # $100M minimum for liquidity filter
+
+# Liquidations (Cascade detection)
+LIQUIDATIONS_ENABLED = False  # Disabled - API rate limits
+LIQUIDATION_THRESHOLD_USD = 10_000_000  # $10M in 1h = cascade
+LIQUIDATION_MULTIPLIER = 1.3  # 30% boost for liquidation events
+
+# Long/Short Ratio (Aggregated positioning)
+LONG_SHORT_RATIO_ENABLED = False  # Disabled - API rate limits
+LS_RATIO_EXTREME_LONG = 1.8  # >1.8 = overleveraged longs (bearish)
+LS_RATIO_EXTREME_SHORT = 0.5  # <0.5 = overleveraged shorts (bullish)
+LS_RATIO_MULTIPLIER = 1.2  # 20% boost for extreme positioning
+
+# NOTE: Coinglass free API has rate limits. Enable these when you have API access.
+# Alternative: Use paid Coinglass API key or implement multi-exchange fetching yourself.
 
 # Volume/Market Cap Configuration
 VOLUME_MCAP_NORMALIZATION = 'log'  # 'log' or 'minmax' normalization
-HIGH_LIQUIDITY_THRESHOLD = 0.8  # Threshold for high significance events
-LOW_LIQUIDITY_THRESHOLD = 0.2  # Threshold for potential manipulation detection
 
 # CoinMarketCap API Configuration
 CMC_API_KEY = "1f95581d-5beb-4bf5-985e-cb8fac961084"
@@ -247,34 +247,19 @@ def run_outlier_analysis():
         
         if not all_scores.empty:
             print(f"\nAnalyzed {len(all_scores)} coins in {elapsed:.2f}s")
-            print(f"\n=== TOP {min(MAX_OUTLIER_DISPLAY, len(all_scores))} OUTLIERS ===")
-            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'Z-Score':<10} {'Score':<10} {'HL(h)':<8} {'Vol-Z':<8} {'MTF':<5} {'FR%':<8} {'Basis%':<8} {'OB':<8} {'Signal':<12}")
-            print("-" * 115)
-            
+            print(f"\n=== TOP {min(MAX_OUTLIER_DISPLAY, len(all_scores))} OUTLIERS WITH PREDICTIVE SIGNALS ===")
+            print(f"{'Rank':<4} {'Coin':<8} {'Price':<12} {'Z-Score':<10} {'Vel':<8} {'Accel':<8} {'Score':<8} {'HL(h)':<6}")
+            print("-" * 70)
+
             display_count = min(MAX_OUTLIER_DISPLAY, len(all_scores))
             for idx, (_, row) in enumerate(all_scores.head(display_count).iterrows(), 1):
                 z_score = row.get('z_score', 0)
+                z_velocity = row.get('z_velocity', 0) * Z_SCORE_VELOCITY_DISPLAY_MULTIPLIER
+                z_accel = row.get('z_accel', 0) * Z_SCORE_ACCELERATION_DISPLAY_MULTIPLIER
                 score = row.get('relative_score', 0)
                 half_life = row.get('half_life', 999)
-                vol_surge = row.get('volume_surge_z', 0)
-                mtf_aligned = row.get('mtf_aligned', 0)
-                funding_rate = row.get('funding_rate', 0)
-                perp_basis = row.get('perp_spot_basis', 0)
-                ob_imbalance = row.get('bid_ask_imbalance', 0)
-                
-                # Signal interpretation
-                if vol_surge > 2.0 and mtf_aligned >= 2:
-                    signal = f"STRONG ({vol_surge:.1f}σ)"
-                elif mtf_aligned >= 2:
-                    signal = "CONFIRMED"
-                elif abs(z_score) > 2.0:
-                    signal = "OUTLIER"
-                elif abs(z_score) > 1.5:
-                    signal = "Moderate"
-                else:
-                    signal = "Weak"
-                
-                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {score:<10.2f} {half_life:<8.1f} {vol_surge:<8.2f} {mtf_aligned:<5} {funding_rate:<8.3f} {perp_basis:<8.3f} {ob_imbalance:<8.3f} {signal:<12}")
+
+                print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {z_velocity:<8.2f} {z_accel:<8.2f} {score:<8.2f} {half_life:<6.1f}")
                 
             return {'total_coins': len(all_scores), 'top_outliers': all_scores.head(10), 'execution_time': elapsed}
         else:

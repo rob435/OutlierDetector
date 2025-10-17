@@ -53,82 +53,98 @@ class BinanceDataDownloader:
             logger.error(f"Futures market failed for {symbol}: {futures_error}")
             return []
     
-    def download_coin_data(self, coin: str, days_back: int = 365) -> bool:
+    def download_coin_data(self, coin: str, days_back: int = 365, interval: str = "5m") -> bool:
         # Use special mapping if available, otherwise default format
         if coin in self.symbol_mappings:
             symbol = self.symbol_mappings[coin]
         else:
             symbol = f"{coin}USDT"
-        
+
         end_time = int(time.time() * 1000)
         start_time = end_time - (days_back * 24 * 60 * 60 * 1000)
-        
-        logger.info(f"Downloading data for {symbol} from {datetime.fromtimestamp(start_time/1000)} to {datetime.fromtimestamp(end_time/1000)}")
-        
+
+        logger.info(f"Downloading data for {symbol} ({interval}) from {datetime.fromtimestamp(start_time/1000)} to {datetime.fromtimestamp(end_time/1000)}")
+
+        # Calculate interval multiplier for pagination
+        interval_minutes = {
+            "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440
+        }
+        minutes = interval_minutes.get(interval, 5)
+
         all_klines = []
         current_start = start_time
-        
+
         while current_start < end_time:
-            current_end = min(current_start + (1000 * 5 * 60 * 1000), end_time)
-            
-            klines = self.get_klines(symbol, start_time=current_start, end_time=current_end)
-            
+            current_end = min(current_start + (1000 * minutes * 60 * 1000), end_time)
+
+            klines = self.get_klines(symbol, interval=interval, start_time=current_start, end_time=current_end)
+
             if not klines:
-                logger.warning(f"No data received for {symbol} in time range {current_start} to {current_end}")
+                logger.warning(f"No data received for {symbol} ({interval}) in time range {current_start} to {current_end}")
                 break
-            
+
             all_klines.extend(klines)
             current_start = current_end
-            
+
             time.sleep(0.1)
-        
+
         if not all_klines:
-            logger.error(f"No data downloaded for {symbol}")
+            logger.error(f"No data downloaded for {symbol} ({interval})")
             return False
-        
+
         df = pd.DataFrame(all_klines, columns=[
             'open_time', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
             'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
         ])
-        
-        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'quote_asset_volume', 
+
+        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'quote_asset_volume',
                           'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume']
         df[numeric_columns] = df[numeric_columns].astype(float)
         df[['open_time', 'close_time', 'number_of_trades']] = df[['open_time', 'close_time', 'number_of_trades']].astype(int)
-        
+
         df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
         df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
-        
+
         df = df.drop(['ignore'], axis=1)
-        
-        filename = f"{self.data_folder}/{coin}_5m_ohlcv.parquet"
+
+        filename = f"{self.data_folder}/{coin}_{interval}_ohlcv.parquet"
         df.to_parquet(filename, index=False)
-        
-        logger.info(f"Saved {len(df)} records for {symbol} to {filename}")
+
+        logger.info(f"Saved {len(df)} records for {symbol} ({interval}) to {filename}")
         return True
     
-    def download_all_coins(self, days_back: int = 365):
-        logger.info(f"Starting download for {len(COINS)} coins, going back {days_back} days")
-        
+    def download_all_coins(self, days_back: int = 365, intervals: List[str] = None):
+        if intervals is None:
+            intervals = ["5m"]
+
+        logger.info(f"Starting download for {len(COINS)} coins across {len(intervals)} intervals, going back {days_back} days")
+
         successful_downloads = 0
         failed_downloads = 0
-        
+
         for i, coin in enumerate(COINS, 1):
             logger.info(f"Processing {coin} ({i}/{len(COINS)})")
-            
-            try:
-                if self.download_coin_data(coin, days_back):
-                    successful_downloads += 1
-                else:
+
+            coin_success = True
+            for interval in intervals:
+                try:
+                    if not self.download_coin_data(coin, days_back, interval):
+                        coin_success = False
+                        failed_downloads += 1
+                except Exception as e:
+                    logger.error(f"Unexpected error downloading {coin} ({interval}): {e}")
+                    coin_success = False
                     failed_downloads += 1
-            except Exception as e:
-                logger.error(f"Unexpected error downloading {coin}: {e}")
-                failed_downloads += 1
-            
-            time.sleep(0.5)
-        
-        logger.info(f"Download completed. Successful: {successful_downloads}, Failed: {failed_downloads}")
+
+                time.sleep(0.2)
+
+            if coin_success:
+                successful_downloads += 1
+
+            time.sleep(0.3)
+
+        logger.info(f"Download completed. Successful coins: {successful_downloads}, Failed operations: {failed_downloads}")
 
 
 def main():

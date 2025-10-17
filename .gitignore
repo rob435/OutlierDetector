@@ -184,3 +184,9 @@ Desktop.ini
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Data files
+*.parquet
+
+# Claude settings
+.claude/settings.local.json
