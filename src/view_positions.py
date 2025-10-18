@@ -49,18 +49,17 @@ def view_open_positions():
             print(f"Warning: Could not fetch price for {coin}: {e}")
             current_prices[coin] = None
 
-    print("\n" + "=" * 140)
+    print("\n" + "=" * 150)
     print("OPEN POSITIONS WITH LIVE P&L")
-    print("=" * 140)
-    print(f"{'ID':<20} {'Pair':<15} {'Coin':<6} {'Dir':<6} {'Entry $':<12} {'Current $':<12} {'Size $':<10} {'P&L $':<10} {'P&L %':<8} {'Entry Z':<8} {'Hedge':<6}")
-    print("-" * 140)
+    print("=" * 150)
+    print(f"{'ID':<20} {'Variant':<10} {'Coin':<6} {'Dir':<6} {'Entry $':<12} {'Current $':<12} {'Size $':<10} {'P&L $':<10} {'P&L %':<8} {'Entry Z':<8} {'Hedge':<6}")
+    print("-" * 150)
 
     total_pnl = 0
 
     for _, pos in open_positions.iterrows():
         pos_id = pos['position_id'][-12:]
-        pair_id = pos.get('pair_id', 'N/A')
-        pair_id_short = pair_id[-8:] if pair_id and pair_id != 'N/A' else 'N/A'
+        variant = pos.get('strategy_variant', 'N/A')[:8]  # BASELINE or FILTERED
         coin = pos['coin']
         direction = pos['direction']
         entry_price = pos['entry_price']
@@ -87,7 +86,7 @@ def view_open_positions():
 
         pnl_sign = "+" if pnl_usd > 0 else ""
 
-        print(f"{pos_id:<20} {pair_id_short:<15} {coin:<6} {direction:<6} ${entry_price:<11,.2f} {current_price_str:<12} ${size_usd:<9.0f} {pnl_sign}${pnl_usd:<9.2f} {pnl_sign}{pnl_pct:<7.2f}% {entry_z:<7.2f} {is_hedge:<6}")
+        print(f"{pos_id:<20} {variant:<10} {coin:<6} {direction:<6} ${entry_price:<11,.2f} {current_price_str:<12} ${size_usd:<9.0f} {pnl_sign}${pnl_usd:<9.2f} {pnl_sign}{pnl_pct:<7.2f}% {entry_z:<7.2f} {is_hedge:<6}")
 
     # Calculate portfolio metrics
     total_deployed = open_positions['position_size_usd'].sum()
@@ -95,15 +94,21 @@ def view_open_positions():
     portfolio_heat = (total_deployed / capital) * 100
     total_pnl_pct = (total_pnl / capital) * 100
 
-    print("-" * 140)
+    print("-" * 150)
     print(f"\nOpen Positions: {len(open_positions)}")
     print(f"Total Deployed: ${total_deployed:,.0f}")
-    print(f"Portfolio Heat: {portfolio_heat:.1f}% (max 40%)")
+    print(f"Portfolio Heat: {portfolio_heat:.1f}% (max 100%)")
 
     # Group by pair to show delta-neutral pairs
     if 'pair_id' in open_positions.columns:
         pairs = open_positions.groupby('pair_id')
         print(f"Active Pairs: {len(pairs)}")
+
+    # Show A/B test distribution
+    if 'strategy_variant' in open_positions.columns:
+        baseline_count = len(open_positions[open_positions['strategy_variant'] == 'BASELINE'])
+        filtered_count = len(open_positions[open_positions['strategy_variant'] == 'FILTERED'])
+        print(f"Strategy Variants: {baseline_count} BASELINE, {filtered_count} FILTERED")
 
     print(f"\nUnrealized P&L: ${total_pnl:+,.2f} ({total_pnl_pct:+.3f}%)")
     print(f"Portfolio Value: $100,000 → ${capital + total_pnl:,.2f}")

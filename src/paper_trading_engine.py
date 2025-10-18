@@ -12,8 +12,10 @@ from paper_trading_config import (
     ENTRY_Z_THRESHOLD, EXIT_Z_THRESHOLD, STOP_LOSS_Z_THRESHOLD,
     USE_MULTI_FACTOR_FILTERS, MIN_Z_VELOCITY, MAX_HALF_LIFE_HOURS,
     MIN_VOLUME_SURGE_Z, MAX_ABS_FUNDING_RATE,
-    USE_HALF_LIFE_STOP, HALF_LIFE_STOP_MULTIPLIER
+    USE_HALF_LIFE_STOP, HALF_LIFE_STOP_MULTIPLIER,
+    ENABLE_AB_TESTING, AB_TEST_BASELINE_PCT
 )
+import random
 
 class PaperTradingEngine:
     def __init__(self):
@@ -164,8 +166,16 @@ class PaperTradingEngine:
             if abs(z_score) < ENTRY_Z_THRESHOLD:
                 continue
 
+            # A/B Testing: Randomly assign to BASELINE or FILTERED variant
+            if ENABLE_AB_TESTING:
+                use_filters = random.random() > AB_TEST_BASELINE_PCT
+                strategy_variant = "FILTERED" if use_filters else "BASELINE"
+            else:
+                use_filters = USE_MULTI_FACTOR_FILTERS
+                strategy_variant = "FILTERED" if USE_MULTI_FACTOR_FILTERS else "BASELINE"
+
             # Multi-factor quality filters (PHASE 1: Data Collection)
-            if USE_MULTI_FACTOR_FILTERS:
+            if use_filters:
                 # Filter 1: Z-velocity (momentum toward mean reversion)
                 z_velocity = signal.get('z_velocity', 0)
                 if abs(z_velocity) < MIN_Z_VELOCITY:
@@ -221,8 +231,9 @@ class PaperTradingEngine:
             # Determine direction
             direction = 'SHORT' if z_score > 0 else 'LONG'
 
-            # Prepare signal metadata
+            # Prepare signal metadata (store ALL signals for offline analysis)
             signal_metadata = {
+                'strategy_variant': strategy_variant,  # BASELINE or FILTERED
                 'z_velocity': signal.get('z_velocity', 0),
                 'half_life': signal.get('half_life', 0),
                 'volume_surge_z': signal.get('volume_surge_z', 0),

@@ -77,15 +77,36 @@ Jim Simons would say: "Start with simple hypotheses, collect data, iterate"
 - Transaction costs = honest assessment of edge
 - Multi-factor filters = systematic quality control
 
-### Expected Outcome
-After collecting data, we'll analyze:
-1. Which z-score ranges are most profitable? (1.5-2.0, 2.0-3.0, 3.0+)
-2. Does half-life predict success?
-3. Does z-velocity matter?
-4. Are funding rates useful?
-5. What's the Sharpe ratio AFTER transaction costs?
+### Added - A/B Testing Framework (Isolate Factor Performance)
+- **ENABLE_AB_TESTING**: True
+- **AB_TEST_BASELINE_PCT**: 50% (50% baseline, 50% all filters)
+  - **Strategy Variants**:
+    - **BASELINE** (50%): z±1.5 only, NO filters applied
+    - **FILTERED** (50%): z±1.5 + all 4 filters (velocity, half-life, volume, funding)
+  - **Rationale**: Can't isolate which filters help if we apply all filters to all trades
+  - **Impact**: Compare BASELINE vs FILTERED performance directly
 
-Then we iterate or kill the strategy based on evidence.
+### How A/B Testing Works:
+1. **Entry Logic**: Each trade randomly assigned BASELINE or FILTERED (50/50 split)
+2. **Data Collection**: ALL signal data stored for EVERY position (velocity, half-life, volume, funding)
+3. **Offline Analysis**: After 100+ trades, analyze retroactively:
+   - What if we only used half-life filter?
+   - What if we only used velocity filter?
+   - What if we combined velocity + half-life?
+   - Which combination actually improves results?
+
+### Expected Outcome
+After collecting data from both variants, we'll analyze:
+1. **Direct comparison**: Does FILTERED outperform BASELINE?
+2. **Factor isolation**: Which individual filters matter?
+   - Half-life < 48h: Does it help?
+   - Z-velocity > 0.02: Does it predict success?
+   - Volume surge > -1.0: Does it avoid bad trades?
+   - Funding rate < 5%: Does it matter?
+3. **Z-score ranges**: Which entry thresholds work best? (1.5-2.0, 2.0-3.0, 3.0+)
+4. **Transaction cost impact**: What's the Sharpe ratio AFTER 0.18% round trip?
+
+Then we build PHASE 2 weighted scoring based on evidence, or kill the strategy if no edge survives costs.
 
 ---
 

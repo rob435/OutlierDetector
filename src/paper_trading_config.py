@@ -25,6 +25,14 @@ MAX_HALF_LIFE_HOURS = 48  # Maximum half-life (prefer faster mean reversion)
 MIN_VOLUME_SURGE_Z = -1.0  # Avoid collapsing volume (not below -1 std dev)
 MAX_ABS_FUNDING_RATE = 0.05  # Avoid extreme funding rate environments (5%)
 
+# A/B Testing Configuration (isolate factor performance)
+ENABLE_AB_TESTING = True  # Enable A/B testing of filter strategies
+AB_TEST_BASELINE_PCT = 0.50  # 50% baseline (no filters), 50% all filters
+# Strategy Variants:
+# - BASELINE: z±1.5 only (no filters)
+# - FILTERED: z±1.5 + all 4 filters (velocity, half-life, volume, funding)
+# All signal data stored for offline analysis of individual filters
+
 # Time-Based Stops (using half-life)
 USE_HALF_LIFE_STOP = True
 HALF_LIFE_STOP_MULTIPLIER = 2.0  # Exit if hold_time > 2 × half_life (not reverting)
