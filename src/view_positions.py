@@ -7,6 +7,7 @@ Run this anytime to see your paper trading status without running the full syste
 import pandas as pd
 import os
 from datetime import datetime
+import ccxt
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +23,7 @@ def load_positions():
     return pd.read_parquet(POSITIONS_FILE)
 
 def view_open_positions():
-    """Display all open positions"""
+    """Display all open positions with live P&L"""
     positions = load_positions()
 
     if positions.empty:
@@ -35,14 +36,29 @@ def view_open_positions():
         print("\nNo open positions")
         return
 
-    print("\n" + "=" * 120)
-    print("OPEN POSITIONS")
-    print("=" * 120)
-    print(f"{'ID':<20} {'Pair':<15} {'Coin':<6} {'Dir':<6} {'Entry $':<10} {'Size $':<10} {'Entry Z':<8} {'Opened':<20} {'Hedge':<6}")
-    print("-" * 120)
+    # Fetch current prices
+    exchange = ccxt.binance()
+    current_prices = {}
+
+    print("\nFetching current prices...")
+    for coin in open_positions['coin'].unique():
+        try:
+            ticker = exchange.fetch_ticker(f'{coin}/USDT')
+            current_prices[coin] = ticker['last']
+        except Exception as e:
+            print(f"Warning: Could not fetch price for {coin}: {e}")
+            current_prices[coin] = None
+
+    print("\n" + "=" * 140)
+    print("OPEN POSITIONS WITH LIVE P&L")
+    print("=" * 140)
+    print(f"{'ID':<20} {'Pair':<15} {'Coin':<6} {'Dir':<6} {'Entry $':<12} {'Current $':<12} {'Size $':<10} {'P&L $':<10} {'P&L %':<8} {'Entry Z':<8} {'Hedge':<6}")
+    print("-" * 140)
+
+    total_pnl = 0
 
     for _, pos in open_positions.iterrows():
-        pos_id = pos['position_id'][-12:]  # Last 12 chars
+        pos_id = pos['position_id'][-12:]
         pair_id = pos.get('pair_id', 'N/A')
         pair_id_short = pair_id[-8:] if pair_id and pair_id != 'N/A' else 'N/A'
         coin = pos['coin']
@@ -53,14 +69,33 @@ def view_open_positions():
         entry_time = pd.to_datetime(pos['entry_timestamp']).strftime('%Y-%m-%d %H:%M')
         is_hedge = 'YES' if pos.get('is_hedge', False) else 'NO'
 
-        print(f"{pos_id:<20} {pair_id_short:<15} {coin:<6} {direction:<6} ${entry_price:<9.2f} ${size_usd:<9.0f} {entry_z:<7.2f} {entry_time:<20} {is_hedge:<6}")
+        # Calculate P&L
+        current_price = current_prices.get(coin)
+        if current_price is None:
+            pnl_usd = 0
+            pnl_pct = 0
+            current_price_str = "N/A"
+        else:
+            if direction == 'LONG':
+                pnl_pct = ((current_price - entry_price) / entry_price) * 100
+            else:  # SHORT
+                pnl_pct = ((entry_price - current_price) / entry_price) * 100
 
-    # Calculate portfolio heat
+            pnl_usd = size_usd * (pnl_pct / 100)
+            total_pnl += pnl_usd
+            current_price_str = f"${current_price:,.2f}"
+
+        pnl_sign = "+" if pnl_usd > 0 else ""
+
+        print(f"{pos_id:<20} {pair_id_short:<15} {coin:<6} {direction:<6} ${entry_price:<11,.2f} {current_price_str:<12} ${size_usd:<9.0f} {pnl_sign}${pnl_usd:<9.2f} {pnl_sign}{pnl_pct:<7.2f}% {entry_z:<7.2f} {is_hedge:<6}")
+
+    # Calculate portfolio metrics
     total_deployed = open_positions['position_size_usd'].sum()
-    capital = 100000  # From config
+    capital = 100000
     portfolio_heat = (total_deployed / capital) * 100
+    total_pnl_pct = (total_pnl / capital) * 100
 
-    print("-" * 120)
+    print("-" * 140)
     print(f"\nOpen Positions: {len(open_positions)}")
     print(f"Total Deployed: ${total_deployed:,.0f}")
     print(f"Portfolio Heat: {portfolio_heat:.1f}% (max 40%)")
@@ -69,6 +104,9 @@ def view_open_positions():
     if 'pair_id' in open_positions.columns:
         pairs = open_positions.groupby('pair_id')
         print(f"Active Pairs: {len(pairs)}")
+
+    print(f"\nUnrealized P&L: ${total_pnl:+,.2f} ({total_pnl_pct:+.3f}%)")
+    print(f"Portfolio Value: $100,000 → ${capital + total_pnl:,.2f}")
 
 def view_closed_positions():
     """Display all closed positions with P&L"""
