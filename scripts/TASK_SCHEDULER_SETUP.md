@@ -6,6 +6,18 @@ This guide shows how to schedule the OutlierDetector paper trading system to run
 ## Files Created
 - `run_daily.bat` - Basic Windows batch script
 - `run_daily.ps1` - PowerShell script (recommended, more features)
+- `run_daily_scheduled.bat` - Silent execution with auto-logging (for Task Scheduler)
+- `OutlierDetector_Task.xml` - Pre-configured task definition
+- `install_task.bat` - One-click installer
+
+## QUICK INSTALL (Recommended - 30 seconds)
+
+1. **Right-click** `install_task.bat` → **Run as administrator**
+2. Done! The task is now scheduled to run daily at 9:00 AM
+
+To change the schedule time, open Task Scheduler (`Win+R` → `taskschd.msc`) and edit the task.
+
+---
 
 ## Option 1: Quick Test (Manual Run)
 
