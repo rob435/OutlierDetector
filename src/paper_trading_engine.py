@@ -9,7 +9,10 @@ from signal_logger import SignalLogger
 from position_manager import PositionManager
 from performance_tracker import PerformanceTracker
 from paper_trading_config import (
-    ENTRY_Z_THRESHOLD, EXIT_Z_THRESHOLD, STOP_LOSS_Z_THRESHOLD
+    ENTRY_Z_THRESHOLD, EXIT_Z_THRESHOLD, STOP_LOSS_Z_THRESHOLD,
+    USE_MULTI_FACTOR_FILTERS, MIN_Z_VELOCITY, MAX_HALF_LIFE_HOURS,
+    MIN_VOLUME_SURGE_Z, MAX_ABS_FUNDING_RATE,
+    USE_HALF_LIFE_STOP, HALF_LIFE_STOP_MULTIPLIER
 )
 
 class PaperTradingEngine:
@@ -68,6 +71,35 @@ class PaperTradingEngine:
                 )
 
                 continue
+
+            # Check half-life based time stop (position not reverting)
+            if USE_HALF_LIFE_STOP and 'half_life' in position and position['half_life'] is not None:
+                from datetime import datetime
+                import pandas as pd
+                entry_time = pd.to_datetime(position['entry_timestamp'])
+                hold_time_hours = (datetime.now() - entry_time).total_seconds() / 3600
+                max_hold_time = position['half_life'] * HALF_LIFE_STOP_MULTIPLIER
+
+                if hold_time_hours > max_hold_time:
+                    positions_to_close.append({
+                        'position_id': position['position_id'],
+                        'exit_price': current_price,
+                        'z_score': current_z,
+                        'exit_reason': 'HALF_LIFE_STOP'
+                    })
+
+                    # Log time-based stop
+                    self.signal_logger.log_signal(
+                        'HALF_LIFE_STOP',
+                        coin,
+                        current_z,
+                        current_price,
+                        position_id=position['position_id'],
+                        hold_time=hold_time_hours,
+                        max_hold_time=max_hold_time
+                    )
+
+                    continue
 
             # Check mean reversion exit (z crosses back to 0)
             entry_direction = position['direction']
@@ -128,9 +160,63 @@ class PaperTradingEngine:
             if len(open_positions) > 0 and coin in open_positions['coin'].values:
                 continue
 
-            # Entry signal: |z| > 2.0
+            # Entry signal: |z| > threshold
             if abs(z_score) < ENTRY_Z_THRESHOLD:
                 continue
+
+            # Multi-factor quality filters (PHASE 1: Data Collection)
+            if USE_MULTI_FACTOR_FILTERS:
+                # Filter 1: Z-velocity (momentum toward mean reversion)
+                z_velocity = signal.get('z_velocity', 0)
+                if abs(z_velocity) < MIN_Z_VELOCITY:
+                    self.signal_logger.log_signal(
+                        'SKIPPED',
+                        coin,
+                        z_score,
+                        price,
+                        reason='LOW_Z_VELOCITY',
+                        z_velocity=z_velocity
+                    )
+                    continue
+
+                # Filter 2: Half-life (prefer faster mean reversion)
+                half_life = signal.get('half_life', 0)
+                if half_life > MAX_HALF_LIFE_HOURS:
+                    self.signal_logger.log_signal(
+                        'SKIPPED',
+                        coin,
+                        z_score,
+                        price,
+                        reason='SLOW_HALF_LIFE',
+                        half_life=half_life
+                    )
+                    continue
+
+                # Filter 3: Volume surge (avoid collapsing volume)
+                volume_surge_z = signal.get('volume_surge_z', 0)
+                if volume_surge_z < MIN_VOLUME_SURGE_Z:
+                    self.signal_logger.log_signal(
+                        'SKIPPED',
+                        coin,
+                        z_score,
+                        price,
+                        reason='COLLAPSING_VOLUME',
+                        volume_surge_z=volume_surge_z
+                    )
+                    continue
+
+                # Filter 4: Funding rate (avoid extreme environments)
+                funding_rate = signal.get('funding_rate', 0)
+                if abs(funding_rate) > MAX_ABS_FUNDING_RATE:
+                    self.signal_logger.log_signal(
+                        'SKIPPED',
+                        coin,
+                        z_score,
+                        price,
+                        reason='EXTREME_FUNDING',
+                        funding_rate=funding_rate
+                    )
+                    continue
 
             # Determine direction
             direction = 'SHORT' if z_score > 0 else 'LONG'

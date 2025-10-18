@@ -11,7 +11,8 @@ from datetime import datetime
 from paper_trading_config import (
     POSITIONS_FILE, PAPER_TRADING_DIR, STARTING_CAPITAL,
     POSITION_SIZE_PCT, MAX_CONCURRENT_POSITIONS, MAX_PORTFOLIO_HEAT,
-    MAKER_FEE, TAKER_FEE, SLIPPAGE, FUNDING_RATE_COST_PER_8H,
+    TAKER_FEE, SLIPPAGE, TOTAL_ENTRY_COST, TOTAL_EXIT_COST,
+    USE_ACTUAL_FUNDING_RATES, APPLY_TRANSACTION_COSTS,
     STOP_LOSS_Z_THRESHOLD, DELTA_NEUTRAL_ENABLED, HEDGE_RATIO
 )
 
@@ -58,8 +59,13 @@ class PositionManager:
         position_size_coins = position_size_usd / entry_price
 
         # Calculate entry cost (fees + slippage)
-        entry_cost = entry_price * (TAKER_FEE + SLIPPAGE)  # Assume taker entry
-        effective_entry_price = entry_price + entry_cost if direction == "LONG" else entry_price - entry_cost
+        if APPLY_TRANSACTION_COSTS:
+            entry_cost_pct = TOTAL_ENTRY_COST
+            entry_cost = entry_price * entry_cost_pct
+            effective_entry_price = entry_price + entry_cost if direction == "LONG" else entry_price - entry_cost
+        else:
+            entry_cost = 0
+            effective_entry_price = entry_price
 
         # Generate pair ID for delta-neutral positions
         pair_id = self._generate_pair_id() if DELTA_NEUTRAL_ENABLED else None
@@ -97,8 +103,12 @@ class PositionManager:
             hedge_size_usd = position_size_usd * HEDGE_RATIO
             hedge_size_btc = hedge_size_usd / btc_price
 
-            hedge_entry_cost = btc_price * (TAKER_FEE + SLIPPAGE)
-            hedge_effective_price = btc_price + hedge_entry_cost if hedge_direction == "LONG" else btc_price - hedge_entry_cost
+            if APPLY_TRANSACTION_COSTS:
+                hedge_entry_cost = btc_price * TOTAL_ENTRY_COST
+                hedge_effective_price = btc_price + hedge_entry_cost if hedge_direction == "LONG" else btc_price - hedge_entry_cost
+            else:
+                hedge_entry_cost = 0
+                hedge_effective_price = btc_price
 
             hedge_data = {
                 'position_id': self._generate_position_id(),
@@ -161,11 +171,19 @@ class PositionManager:
         hold_time_hours = (exit_time - entry_time).total_seconds() / 3600
 
         # Calculate exit cost (fees + slippage)
-        exit_cost = exit_price * (MAKER_FEE + SLIPPAGE)  # Assume maker exit (limit order)
+        if APPLY_TRANSACTION_COSTS:
+            exit_cost_pct = TOTAL_EXIT_COST
+            exit_cost = exit_price * exit_cost_pct
 
-        # Calculate funding cost (every 8 hours)
-        funding_periods = int(hold_time_hours / 8)
-        funding_cost = position['position_size_usd'] * FUNDING_RATE_COST_PER_8H * funding_periods
+            # Calculate funding cost (use actual funding rate if available)
+            if USE_ACTUAL_FUNDING_RATES and 'funding_rate' in position and position['funding_rate'] is not None:
+                funding_periods = hold_time_hours / 8  # Funding every 8 hours
+                funding_cost = abs(position['position_size_usd'] * position['funding_rate'] * funding_periods)
+            else:
+                funding_cost = 0  # No funding cost if data unavailable
+        else:
+            exit_cost = 0
+            funding_cost = 0
 
         # Calculate P&L
         if position['direction'] == "LONG":

@@ -6,6 +6,89 @@ Format: Date, change description, rationale, impact
 
 ---
 
+## [2025-10-18] PHASE 1: Data Collection Optimization
+
+### Changed - Portfolio Configuration
+- **POSITION_SIZE_PCT**: 2% → 1% per leg
+  - **Rationale**: Smaller positions allow more concurrent pairs (50 vs 20) for faster data collection
+  - **Impact**: Can deploy up to 50 pairs simultaneously with 100% capital utilization
+
+- **MAX_PORTFOLIO_HEAT**: 40% → 100%
+  - **Rationale**: Maximize trade frequency during data collection phase to validate strategy faster
+  - **Impact**: More positions = more statistical samples = faster learning
+
+- **MAX_CONCURRENT_POSITIONS**: 10 → 50 pairs
+  - **Rationale**: Support 100% heat with 1% position sizing
+  - **Impact**: Can have many positions open simultaneously
+
+### Changed - Signal Thresholds (More Aggressive for Data Collection)
+- **ENTRY_Z_THRESHOLD**: ±2.0 → ±1.5
+  - **Rationale**: Lower barrier to entry = more trades = more data to analyze
+  - **Impact**: Will enter positions on weaker signals (track which z-score ranges are profitable)
+
+- **EXIT_Z_THRESHOLD**: ±0.5 → ±0.3
+  - **Rationale**: Tighter profit taking to increase trade turnover
+  - **Impact**: Exit faster when mean reversion occurs, collect more completed trades
+
+### Added - Multi-Factor Entry Filters (PHASE 1: Quality Filters)
+- **USE_MULTI_FACTOR_FILTERS**: Now using 4 quality filters beyond z-score
+  - **MIN_Z_VELOCITY**: 0.02 (require momentum toward mean reversion)
+  - **MAX_HALF_LIFE_HOURS**: 48h (prefer faster mean reversion)
+  - **MIN_VOLUME_SURGE_Z**: -1.0 (avoid collapsing volume)
+  - **MAX_ABS_FUNDING_RATE**: 5% (avoid extreme funding environments)
+  - **Rationale**: Filter out low-quality signals while still collecting diverse data
+  - **Impact**: Better signal quality, track which filters actually matter
+
+### Added - Realistic Transaction Cost Modeling
+- **APPLY_TRANSACTION_COSTS**: True (now modeling real costs)
+  - **TAKER_FEE**: 0.04% per side
+  - **SLIPPAGE**: 0.05% estimate
+  - **TOTAL_ENTRY_COST**: 0.09% per entry
+  - **TOTAL_EXIT_COST**: 0.09% per exit
+  - **TOTAL_ROUND_TRIP_COST**: 0.18% per trade
+  - **USE_ACTUAL_FUNDING_RATES**: True (use actual 8h funding data)
+  - **Rationale**: Jim Simons: "Show me Sharpe ratio AFTER costs"
+  - **Impact**: Will know if edge survives real trading friction
+
+### Added - Half-Life Based Time Stop
+- **USE_HALF_LIFE_STOP**: True
+- **HALF_LIFE_STOP_MULTIPLIER**: 2.0x
+  - **Logic**: Exit if hold_time > 2 × half_life (position not reverting as expected)
+  - **Rationale**: Don't hold positions that aren't behaving statistically
+  - **Impact**: Cut losers faster when mean reversion fails
+
+### Strategy Evolution - PHASE 1 vs PHASE 2
+**Current (PHASE 1)**: Data collection with quality filters
+- Multi-factor filters (velocity, half-life, volume, funding)
+- Each filter applied as binary threshold
+- Goal: Collect 100+ trades to validate which signals matter
+
+**Future (PHASE 2)**: Weighted composite scoring
+- Build evidence-based weighted score from PHASE 1 results
+- Analyze which factors actually predict profitability
+- Optimize weights based on historical performance
+- More sophisticated signal combination
+
+### Rationale - Why This Approach?
+Jim Simons would say: "Start with simple hypotheses, collect data, iterate"
+- We're testing hypothesis #1: BTC-relative z-score mean reversion
+- Lower thresholds + quality filters = more diverse data
+- 100% heat = faster statistical validation
+- Transaction costs = honest assessment of edge
+- Multi-factor filters = systematic quality control
+
+### Expected Outcome
+After collecting data, we'll analyze:
+1. Which z-score ranges are most profitable? (1.5-2.0, 2.0-3.0, 3.0+)
+2. Does half-life predict success?
+3. Does z-velocity matter?
+4. Are funding rates useful?
+5. What's the Sharpe ratio AFTER transaction costs?
+
+Then we iterate or kill the strategy based on evidence.
+
+---
+
 ## [2025-10-17] Statistical Arbitrage Configuration
 
 ### Changed

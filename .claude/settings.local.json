@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(del \"src\\binance_derivatives.py\")"
+      "Bash(del \"src\\binance_derivatives.py\")",
+      "Bash(python3:*)",
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(launchctl list:*)",
+      "Read(//Users/jhbvdnsbkvnsd/Library/LaunchAgents/**)"
     ],
     "deny": []
   }
