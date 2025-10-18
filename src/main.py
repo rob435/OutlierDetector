@@ -5,8 +5,9 @@
 import os
 
 # System Control Configuration
-ENABLE_DATA_DOWNLOAD = False  # Enable automatic data downloading (set to False for faster testing)
+ENABLE_DATA_DOWNLOAD = True  # Enable automatic data downloading (set to False for faster testing)
 ENABLE_OUTLIER_DETECTION = True  # Enable outlier detection system
+ENABLE_PAPER_TRADING = True  # Enable paper trading system
 ENABLE_FULL_SYSTEM_STATUS = True  # Enable full system status reporting
 
 # Data Download Configuration - STAT-ARB REQUIRES MORE HISTORY
@@ -201,7 +202,7 @@ def download_derivatives_history():
 
 
 def run_data_download():
-    """Download and update all required data"""
+    """Download and update all required data with retry logic"""
     if not ENABLE_DATA_DOWNLOAD:
         print("Data download disabled in configuration")
         return False
@@ -210,30 +211,46 @@ def run_data_download():
     print("DATA DOWNLOAD SYSTEM")
     print("=" * 60)
 
-    success = True
+    MAX_RETRIES = 3
+    RETRY_DELAY_SECONDS = 60  # Wait 1 minute between retries
 
-    try:
-        from binance_downloader import BinanceDataDownloader
-        import time
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            from binance_downloader import BinanceDataDownloader
+            import time
 
-        # Download OHLCV data
-        print(f"Downloading {DATA_DOWNLOAD_DAYS} days of OHLCV data for {len(DOWNLOAD_INTERVALS)} timeframes: {DOWNLOAD_INTERVALS}...")
-        start_time = time.time()
-        downloader = BinanceDataDownloader(DATA_FOLDER)
-        downloader.download_all_coins(days_back=DATA_DOWNLOAD_DAYS, intervals=DOWNLOAD_INTERVALS)
-        elapsed = time.time() - start_time
-        print(f"OHLCV download completed in {elapsed:.1f}s")
+            # Download OHLCV data
+            print(f"Downloading {DATA_DOWNLOAD_DAYS} days of OHLCV data for {len(DOWNLOAD_INTERVALS)} timeframes: {DOWNLOAD_INTERVALS}...")
+            print(f"Attempt {attempt}/{MAX_RETRIES}")
 
-        # Download derivatives historical data
-        if DOWNLOAD_DERIVATIVES_HISTORY:
-            derivatives_success = download_derivatives_history()
-            success = success and derivatives_success
+            start_time = time.time()
+            downloader = BinanceDataDownloader(DATA_FOLDER)
+            downloader.download_all_coins(days_back=DATA_DOWNLOAD_DAYS, intervals=DOWNLOAD_INTERVALS)
+            elapsed = time.time() - start_time
+            print(f"OHLCV download completed in {elapsed:.1f}s")
 
-    except Exception as e:
-        print(f"Data download failed: {e}")
-        success = False
+            # Download derivatives historical data
+            derivatives_success = True
+            if DOWNLOAD_DERIVATIVES_HISTORY:
+                derivatives_success = download_derivatives_history()
 
-    return success
+            # If we got here without exception, download succeeded
+            return derivatives_success
+
+        except Exception as e:
+            print(f"Data download failed (attempt {attempt}/{MAX_RETRIES}): {e}")
+
+            if attempt < MAX_RETRIES:
+                print(f"Waiting {RETRY_DELAY_SECONDS} seconds before retry...")
+                print("(This is normal on school wifi / unstable connections)")
+                import time
+                time.sleep(RETRY_DELAY_SECONDS)
+            else:
+                print(f"\nFailed after {MAX_RETRIES} attempts. Giving up.")
+                print("System will use cached data from previous run.")
+                return False
+
+    return False
 
 
 def run_outlier_analysis():
@@ -241,20 +258,20 @@ def run_outlier_analysis():
     if not ENABLE_OUTLIER_DETECTION:
         print("Outlier detection disabled in configuration")
         return {}
-        
+
     print("\n" + "=" * 60)
     print("OUTLIER DETECTION SYSTEM")
     print("=" * 60)
-    
+
     try:
         import time
         from outlier_detector import OutlierDetector
-        
+
         start_time = time.time()
         detector = OutlierDetector()
         all_scores = detector.get_all_current_scores()
         elapsed = time.time() - start_time
-        
+
         if not all_scores.empty:
             print(f"\nAnalyzed {len(all_scores)} coins in {elapsed:.2f}s")
             print(f"\n=== TOP {min(MAX_OUTLIER_DISPLAY, len(all_scores))} OUTLIERS WITH PREDICTIVE SIGNALS ===")
@@ -275,13 +292,51 @@ def run_outlier_analysis():
 
                 print(f"{idx:<4} {row['coin']:<8} {row['close_price']:<12.4f} {z_score:<10.2f} {z_velocity:<8.2f} {score:<8.2f} {half_life:<6.1f} {vol_surge_z:<6.1f} {funding_rate:<8.3f} {ls_ratio:<6.2f} {oi_1h:<8.1f} {oi_24h:<9.1f}")
 
-            return {'total_coins': len(all_scores), 'top_outliers': all_scores.head(10), 'execution_time': elapsed}
+            return {'total_coins': len(all_scores), 'top_outliers': all_scores.head(10), 'all_scores': all_scores, 'execution_time': elapsed}
         else:
             print("No outlier data available")
-            return {'total_coins': 0, 'top_outliers': None}
-            
+            return {'total_coins': 0, 'top_outliers': None, 'all_scores': None}
+
     except Exception as e:
         print(f"Outlier analysis failed: {e}")
+        return {'error': str(e)}
+
+
+def run_paper_trading(outlier_scores):
+    """Run paper trading system with current signals"""
+    if not ENABLE_PAPER_TRADING:
+        return {}
+
+    if outlier_scores is None or outlier_scores.empty:
+        return {'error': 'No outlier scores available'}
+
+    try:
+        from paper_trading_engine import PaperTradingEngine
+        from performance_tracker import PerformanceTracker
+
+        # Initialize paper trading engine
+        engine = PaperTradingEngine()
+
+        # Process signals (open/close positions based on current outliers)
+        engine.process_signals(outlier_scores)
+
+        # Display current status
+        engine.display_status()
+
+        # Calculate and display performance metrics (if enough trades)
+        tracker = PerformanceTracker()
+        metrics = tracker.get_metrics()
+
+        if metrics and 'total_trades' in metrics and metrics['total_trades'] >= 5:
+            tracker.display_metrics()
+
+        return {'status': 'success'}
+
+    except Exception as e:
+        import traceback
+        print(f"Paper trading failed: {e}")
+        print("\nFull traceback:")
+        traceback.print_exc()
         return {'error': str(e)}
     
 
@@ -343,6 +398,7 @@ def main():
         print("\nSystem Configuration:")
         print(f"- Data Download: {'Enabled' if ENABLE_DATA_DOWNLOAD else 'Disabled'}")
         print(f"- Outlier Detection: {'Enabled' if ENABLE_OUTLIER_DETECTION else 'Disabled'}")
+        print(f"- Paper Trading: {'Enabled' if ENABLE_PAPER_TRADING else 'Disabled'}")
     
     # Store results from each system component
     system_results = {}
@@ -356,13 +412,24 @@ def main():
     if ENABLE_DATA_DOWNLOAD:
         download_success = run_data_download()
         system_results['data_download'] = {'success': download_success}
-    
+
+        # If download fails, warn but continue with cached data
+        if not download_success:
+            print("\n⚠️  WARNING: Data download failed (network issue?)")
+            print("Continuing with cached data from previous run")
+            print("Positions may use stale data - check manually if critical\n")
+
     # 3. Outlier Detection System
     if ENABLE_OUTLIER_DETECTION:
         outlier_results = run_outlier_analysis()
         system_results['outlier_detection'] = outlier_results
-    
-    # 4. Final System Summary
+
+        # 4. Paper Trading System (process signals from outlier detection)
+        if ENABLE_PAPER_TRADING and 'all_scores' in outlier_results and outlier_results['all_scores'] is not None:
+            paper_trading_results = run_paper_trading(outlier_results['all_scores'])
+            system_results['paper_trading'] = paper_trading_results
+
+    # 5. Final System Summary
     if ENABLE_FULL_SYSTEM_STATUS:
         end_time = time.time()
         execution_time = end_time - start_time
