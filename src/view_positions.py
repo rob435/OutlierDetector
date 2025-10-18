@@ -59,7 +59,7 @@ def view_open_positions():
 
     for _, pos in open_positions.iterrows():
         pos_id = pos['position_id'][-12:]
-        variant = pos.get('strategy_variant', 'N/A')[:8]  # BASELINE or FILTERED
+        variant = (pos.get('strategy_variant') or 'N/A')[:8]  # BASELINE or FILTERED
         coin = pos['coin']
         direction = pos['direction']
         entry_price = pos['entry_price']
@@ -111,7 +111,7 @@ def view_open_positions():
         print(f"Strategy Variants: {baseline_count} BASELINE, {filtered_count} FILTERED")
 
     print(f"\nUnrealized P&L: ${total_pnl:+,.2f} ({total_pnl_pct:+.3f}%)")
-    print(f"Portfolio Value: $100,000 → ${capital + total_pnl:,.2f}")
+    print(f"Portfolio Value: $100,000 -> ${capital + total_pnl:,.2f}")
 
 def view_closed_positions():
     """Display all closed positions with P&L"""

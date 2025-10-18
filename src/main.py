@@ -5,7 +5,7 @@
 import os
 
 # System Control Configuration
-ENABLE_DATA_DOWNLOAD = True  # Enable automatic data downloading (set to False for faster testing)
+ENABLE_DATA_DOWNLOAD = False  # Enable automatic data downloading (set to False for faster testing)
 ENABLE_OUTLIER_DETECTION = True  # Enable outlier detection system
 ENABLE_PAPER_TRADING = True  # Enable paper trading system
 ENABLE_FULL_SYSTEM_STATUS = True  # Enable full system status reporting
