@@ -174,6 +174,26 @@ async def queue_consumer_loop(
                     ranked_signal.alerted,
                     ranked_signal.regime_score,
                 )
+            if (
+                stage == "confirmed"
+                and engine.settings.telegram_summary_enabled
+                and engine.notifier.enabled
+            ):
+                summary_payload = engine.build_summary_payload(
+                    stage=stage,
+                    cycle_time_ms=cycle_time_ms,
+                    ranked_signals=signals,
+                )
+                if summary_payload is not None:
+                    try:
+                        await engine.notifier.send_summary(summary_payload)
+                        LOGGER.info(
+                            "Sent confirmed summary with top=%s bottom=%s",
+                            len(summary_payload.top_rankings),
+                            len(summary_payload.bottom_rankings),
+                        )
+                    except Exception:
+                        LOGGER.exception("Confirmed cycle summary delivery failed")
             next_eligible_at = loop.time() + min_cycle_spacing_seconds
         except Exception:
             LOGGER.exception("%s signal engine processing failed", stage)

@@ -28,4 +28,5 @@
 - Tightened the intrabar path from simple provisional top-rank polling into a real state machine: tickers now move through `WATCHLIST -> EMERGING -> CONFIRMED`, with `EMERGING` requiring recent rank improvement plus rising composite score across successive intrabar observations.
 - Added `signal_kind` logging so SQLite and Telegram distinguish `watchlist`, `emerging`, `confirmed`, and `none` rows instead of hiding everything under the broader processing stage.
 - Added confirmed rank persistence tracking so close-confirmed signals can upgrade to `confirmed_strong` when a ticker has held leadership across recent confirmed bars, without blocking the first confirmed breakout signal.
+- Added a separate Telegram summary on every confirmed 15m cycle so operators get the top 5 and bottom 5 ranked names even when no event-driven alert transition fires.
 - Verified the implementation locally with `pytest` and `python3 -m py_compile`.

@@ -20,6 +20,7 @@ Real-time crypto breakout detector built around Bybit V5 candle streams, volatil
 - Uses BTC daily regime as a threshold modulator, not a hard block.
 - Uses a BTC-vs-alt-basket relative-strength proxy as the dominance rotation signal. This is the honest compromise for a Bybit-only build because Bybit does not publish BTC dominance history.
 - Logs every evaluated ticker on each cycle to SQLite and optionally sends Telegram alerts with cooldown control.
+- Sends a separate Telegram summary on every confirmed 15m cycle with the top and bottom ranked names, so you can see what the engine is seeing even when no fresh signal transition fires.
 - Logs the top-ranked names each cycle so you can see the leaders even when no symbol passes the final alert filters.
 - Keeps provisional intrabar prices isolated from the confirmed 15m history so early alerts do not contaminate the close-confirmed signal path.
 
@@ -131,6 +132,7 @@ For the first VPS validation run, use [SOAK_RUN.md](/Users/jhbvdnsbkvnsd/Desktop
 - If a candle gap is detected mid-stream, the supervisor falls back to a fresh REST bootstrap instead of pretending state is intact.
 - Cooldown only advances after a successful alert send; a failed Telegram request does not silently suppress the next valid signal.
 - `emerging` and `confirmed` alerts use separate cooldown state, so an early watchlist alert does not block the later close-confirmed alert for the same ticker.
+- Confirmed-cycle summaries are separate from event alerts. They are a routine operator digest, not a signal trigger, and default to the top 5 plus bottom 5 names.
 - The runtime uses the `certifi` CA bundle for outbound TLS, which avoids common macOS Python certificate-store breakage.
 - If you run from a US-routed host, Bybit mainnet access may be blocked. Use a compliant region or testnet/base URL override.
 

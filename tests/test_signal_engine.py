@@ -35,6 +35,10 @@ def test_signal_engine_upgrades_confirmed_signal_with_persistence(tmp_path: Path
     asyncio.run(_exercise_confirmed_persistence_behavior(tmp_path))
 
 
+def test_signal_engine_builds_confirmed_summary_payload(tmp_path: Path) -> None:
+    asyncio.run(_exercise_confirmed_summary_payload(tmp_path))
+
+
 async def _exercise_signal_engine(tmp_path: Path) -> None:
     settings = Settings(
         sqlite_path=str(tmp_path / "signals.db"),
@@ -337,3 +341,61 @@ async def _exercise_confirmed_persistence_behavior(tmp_path: Path) -> None:
             "SELECT signal_kind, persistence_hits FROM signals WHERE ticker = 'AAAUSDT'"
         ).fetchall()
     assert ("confirmed_strong", 2) in rows
+
+
+async def _exercise_confirmed_summary_payload(tmp_path: Path) -> None:
+    settings = Settings(
+        sqlite_path=str(tmp_path / "confirmed-summary.db"),
+        universe=["AAAUSDT", "BBBUSDT", "CCCUSDT"],
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        summary_top_n=2,
+        summary_bottom_n=2,
+        regime_thresholds={0: None, 1: None, 2: None, 3: None},
+    )
+    state = MarketState(settings=settings)
+    timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
+    btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+
+    state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
+    state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
+    state.replace_history("BBBUSDT", list(zip(timestamps, base)))
+    state.replace_history("CCCUSDT", list(zip(timestamps, weak)))
+    state.global_state.btc_daily_closes = np.asarray(
+        [20_000 + idx * 100 for idx in range(settings.btc_daily_lookback)],
+        dtype=float,
+    )
+
+    class SilentNotifier:
+        enabled = True
+
+        async def send(self, payload) -> bool:
+            return True
+
+        async def send_summary(self, payload) -> bool:
+            return True
+
+    database = SignalDatabase(settings.sqlite_path)
+    await database.initialize()
+    engine = SignalEngine(
+        settings=settings,
+        state=state,
+        database=database,
+        notifier=SilentNotifier(),
+    )
+
+    ranked_signals = await engine.process(cycle_time_ms=timestamps[-1], stage="confirmed")
+    summary = engine.build_summary_payload(
+        stage="confirmed",
+        cycle_time_ms=timestamps[-1],
+        ranked_signals=ranked_signals,
+    )
+
+    assert summary is not None
+    assert len(summary.top_rankings) == 2
+    assert len(summary.bottom_rankings) == 2
+    assert summary.top_rankings[0].ticker == "AAAUSDT"
+    assert {entry.ticker for entry in summary.bottom_rankings} == {"BBBUSDT", "CCCUSDT"}

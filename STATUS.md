@@ -22,6 +22,7 @@
 - A post-refactor live run completed successfully against Bybit with both stage paths active: one bootstrap `confirmed` cycle followed by repeated intrabar `emerging` cycles, with `websocket_failures=0`.
 - The intrabar path now requires strengthening before promotion to `emerging`; it no longer equates “currently top-ranked” with “emerging breakout.”
 - Confirmed-bar persistence is now tracked so repeated confirmed leadership is visible as `confirmed_strong` instead of being buried inside generic confirmed rows.
+- Confirmed 15m cycles now emit a routine Telegram summary with the top and bottom ranked names so operators can distinguish "no alerts" from "no activity."
 
 ## Remaining risks
 

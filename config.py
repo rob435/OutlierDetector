@@ -69,6 +69,9 @@ class Settings:
     confirmed_persistence_min_hits: int = 2
     confirmed_persistence_rank: int = 3
     ranking_log_top_n: int = 5
+    telegram_summary_enabled: bool = True
+    summary_top_n: int = 5
+    summary_bottom_n: int = 5
     cooldown_hours: int = 12
     emerging_cooldown_minutes: int = 60
     watchlist_cooldown_minutes: int = 30
@@ -144,6 +147,9 @@ def load_settings() -> Settings:
         confirmed_persistence_min_hits=_get_int("CONFIRMED_PERSISTENCE_MIN_HITS", 2),
         confirmed_persistence_rank=_get_int("CONFIRMED_PERSISTENCE_RANK", 3),
         ranking_log_top_n=_get_int("RANKING_LOG_TOP_N", 5),
+        telegram_summary_enabled=_get_bool("TELEGRAM_SUMMARY_ENABLED", True),
+        summary_top_n=_get_int("SUMMARY_TOP_N", 5),
+        summary_bottom_n=_get_int("SUMMARY_BOTTOM_N", 5),
         cooldown_hours=_get_int("COOLDOWN_HOURS", 12),
         emerging_cooldown_minutes=_get_int("EMERGING_COOLDOWN_MINUTES", 60),
         watchlist_cooldown_minutes=_get_int("WATCHLIST_COOLDOWN_MINUTES", 30),

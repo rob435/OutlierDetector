@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from alerting import AlertPayload, TelegramNotifier
+from alerting import AlertPayload, SummaryEntry, SummaryPayload, TelegramNotifier
 from config import Settings
 from database import SignalDatabase, SignalRecord
 from indicators import (
@@ -154,6 +154,57 @@ class SignalEngine:
             f"#{item.rank} {item.ticker} score={item.composite_score:.2f} "
             f"mom_z={item.momentum_z:.2f} cur_z={item.curvature_z:.2f} hurst={item.hurst:.2f}"
             for item in leaders
+        )
+
+    def get_ranked_tickers(self, stage: str = "confirmed") -> list[RankedTicker]:
+        return list(self.last_ranked_tickers.get(stage, []))
+
+    def build_summary_payload(
+        self,
+        stage: str,
+        cycle_time_ms: int,
+        ranked_signals: list[RankedSignal],
+    ) -> SummaryPayload | None:
+        ranked_tickers = self.get_ranked_tickers(stage=stage)
+        if not ranked_tickers:
+            return None
+        top_n = max(self.settings.summary_top_n, 0)
+        bottom_n = max(self.settings.summary_bottom_n, 0)
+        top_rankings = [
+            SummaryEntry(
+                ticker=item.ticker,
+                rank=item.rank,
+                composite_score=item.composite_score,
+                momentum_z=item.momentum_z,
+                curvature_z=item.curvature_z,
+                hurst=item.hurst,
+            )
+            for item in ranked_tickers[:top_n]
+        ]
+        bottom_rankings = [
+            SummaryEntry(
+                ticker=item.ticker,
+                rank=item.rank,
+                composite_score=item.composite_score,
+                momentum_z=item.momentum_z,
+                curvature_z=item.curvature_z,
+                hurst=item.hurst,
+            )
+            for item in (ranked_tickers[-bottom_n:] if bottom_n else [])
+        ]
+        qualified_signals = [
+            f"{signal.ticker} {signal.signal_kind.upper()} rank={signal.rank} "
+            f"score={signal.composite_score:.2f} alerted={'yes' if signal.alerted else 'no'}"
+            for signal in ranked_signals
+        ]
+        return SummaryPayload(
+            stage=stage,
+            cycle_time_ms=cycle_time_ms,
+            regime_score=self.state.global_state.btc_regime_score,
+            dom_falling=bool(self.state.global_state.dom_falling),
+            top_rankings=top_rankings,
+            bottom_rankings=bottom_rankings,
+            qualified_signals=qualified_signals,
         )
 
     def _compute_regime(self, include_provisional: bool = False) -> tuple[int, int]:
