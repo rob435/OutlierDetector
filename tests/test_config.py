@@ -11,6 +11,7 @@ def test_load_settings_reads_dotenv_without_overriding_env(monkeypatch, tmp_path
         "LOG_LEVEL=debug\n"
         "EMERGING_COOLDOWN_MINUTES=15\n"
         "WATCHLIST_COOLDOWN_MINUTES=15\n"
+        "BTCDOM_EMA_PERIOD=7\n"
         "TELEGRAM_CHAT_ID=from-file\n",
         encoding="utf-8",
     )
@@ -25,4 +26,5 @@ def test_load_settings_reads_dotenv_without_overriding_env(monkeypatch, tmp_path
     assert settings.log_level == "DEBUG"
     assert settings.emerging_cooldown_minutes == 15
     assert settings.watchlist_cooldown_minutes == 15
+    assert settings.btcdom_ema_period == 7
     assert settings.telegram_chat_id == "from-env"

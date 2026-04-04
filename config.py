@@ -60,6 +60,7 @@ class Settings:
     btcdom_symbol: str = "BTCDOMUSDT"
     btcdom_interval: str = "1h"
     btcdom_history_lookback: int = 96
+    btcdom_ema_period: int = 5
     btcdom_state_lookback_bars: int = 4
     btcdom_neutral_threshold_pct: float = 0.002
     momentum_lookback: int = 48
@@ -155,6 +156,7 @@ def load_settings() -> Settings:
         btcdom_symbol=os.getenv("BTCDOM_SYMBOL", "BTCDOMUSDT").upper(),
         btcdom_interval=os.getenv("BTCDOM_INTERVAL", "1h"),
         btcdom_history_lookback=_get_int("BTCDOM_HISTORY_LOOKBACK", 96),
+        btcdom_ema_period=_get_int("BTCDOM_EMA_PERIOD", 5),
         btcdom_state_lookback_bars=_get_int("BTCDOM_STATE_LOOKBACK_BARS", 4),
         btcdom_neutral_threshold_pct=_get_float("BTCDOM_NEUTRAL_THRESHOLD_PCT", 0.002),
         momentum_lookback=_get_int("MOMENTUM_LOOKBACK", 48),
