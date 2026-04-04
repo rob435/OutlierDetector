@@ -60,6 +60,7 @@ async def apply_bootstrap(client: BybitMarketDataClient, state: MarketState, sta
         [close for _, close in payload.btc_daily_history],
         dtype=float,
     )
+    state.replace_btcdom_history(payload.btcdom_history)
     for symbol in state.settings.universe:
         state.reset_intrabar(symbol)
     stats.bootstraps += 1
@@ -91,19 +92,23 @@ async def refresh_macro_state_loop(
 ) -> None:
     while not stop_event.is_set():
         try:
-            daily_candles = await client.fetch_closed_klines(
-                symbol="BTCUSDT",
-                interval="D",
-                limit=state.settings.btc_daily_lookback,
+            daily_candles, btcdom_candles = await asyncio.gather(
+                client.fetch_closed_klines(
+                    symbol="BTCUSDT",
+                    interval="D",
+                    limit=state.settings.btc_daily_lookback,
+                ),
+                client.fetch_btcdom_klines(),
             )
             state.global_state.btc_daily_closes = np.asarray(
                 [close for _, close in daily_candles],
                 dtype=float,
             )
+            state.replace_btcdom_history(btcdom_candles)
             stats.macro_refreshes += 1
-            LOGGER.info("Refreshed BTC daily macro state")
+            LOGGER.info("Refreshed BTC daily and BTCDOM macro state")
         except Exception:
-            LOGGER.exception("Failed refreshing BTC daily macro state")
+            LOGGER.exception("Failed refreshing BTC daily and BTCDOM macro state")
         try:
             await asyncio.wait_for(
                 stop_event.wait(),
@@ -179,21 +184,24 @@ async def queue_consumer_loop(
                 and engine.settings.telegram_summary_enabled
                 and engine.notifier.enabled
             ):
-                summary_payload = engine.build_summary_payload(
-                    stage=stage,
-                    cycle_time_ms=cycle_time_ms,
-                    ranked_signals=signals,
-                )
-                if summary_payload is not None:
-                    try:
-                        await engine.notifier.send_summary(summary_payload)
-                        LOGGER.info(
-                            "Sent confirmed summary with top=%s bottom=%s",
-                            len(summary_payload.top_rankings),
-                            len(summary_payload.bottom_rankings),
-                        )
-                    except Exception:
-                        LOGGER.exception("Confirmed cycle summary delivery failed")
+                if await engine.database.record_summary_cycle(stage=stage, cycle_time_ms=cycle_time_ms):
+                    summary_payload = engine.build_summary_payload(
+                        stage=stage,
+                        cycle_time_ms=cycle_time_ms,
+                        ranked_signals=signals,
+                    )
+                    if summary_payload is not None:
+                        try:
+                            await engine.notifier.send_summary(summary_payload)
+                            LOGGER.info(
+                                "Sent confirmed summary with top=%s bottom=%s",
+                                len(summary_payload.top_rankings),
+                                len(summary_payload.bottom_rankings),
+                            )
+                        except Exception:
+                            LOGGER.exception("Confirmed cycle summary delivery failed")
+                else:
+                    LOGGER.info("Skipping duplicate confirmed summary for cycle %s", cycle_time_ms)
             next_eligible_at = loop.time() + min_cycle_spacing_seconds
         except Exception:
             LOGGER.exception("%s signal engine processing failed", stage)

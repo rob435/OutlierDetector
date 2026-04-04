@@ -50,9 +50,9 @@ async def _exercise_signal_engine(tmp_path: Path) -> None:
 
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
@@ -75,13 +75,14 @@ async def _exercise_signal_engine(tmp_path: Path) -> None:
     with sqlite3.connect(settings.sqlite_path) as connection:
         count = connection.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         ranked = connection.execute(
-            "SELECT ticker, rank, price, dom_falling FROM signals ORDER BY composite_score DESC"
+            "SELECT ticker, rank, price, dom_state, dom_change_pct FROM signals ORDER BY composite_score DESC"
         ).fetchall()
         assert count == 3
         assert ranked[0][0] == "AAAUSDT"
         assert ranked[0][1] == 1
         assert ranked[0][2] > 0
-        assert ranked[0][3] in {0, 1}
+        assert ranked[0][3] in {"falling", "neutral", "rising"}
+        assert isinstance(ranked[0][4], float)
 
 
 async def _exercise_cooldown_behavior(tmp_path: Path) -> None:
@@ -94,9 +95,9 @@ async def _exercise_cooldown_behavior(tmp_path: Path) -> None:
     state = MarketState(settings=settings)
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
@@ -143,9 +144,9 @@ async def _exercise_alert_exception_behavior(tmp_path: Path) -> None:
     state = MarketState(settings=settings)
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
@@ -179,6 +180,7 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
         universe=["AAAUSDT", "BBBUSDT", "CCCUSDT"],
         telegram_bot_token=None,
         telegram_chat_id=None,
+        watchlist_telegram_enabled=True,
         top_n=1,
         emerging_top_n=1,
         watchlist_top_n=5,
@@ -190,9 +192,9 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     next_timestamp = timestamps[-1] + settings.ticker_interval_ms
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
@@ -249,8 +251,8 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
 
     assert state.append_close("BTCUSDT", next_timestamp, btc_prices[-1] + 50.0) is True
     assert state.append_close("AAAUSDT", next_timestamp, strong[-1] + 2.0) is True
-    assert state.append_close("BBBUSDT", next_timestamp, base[-1] + 0.5) is True
-    assert state.append_close("CCCUSDT", next_timestamp, weak[-1] + 0.2) is True
+    assert state.append_close("BBBUSDT", next_timestamp, base[-1] + 0.02) is True
+    assert state.append_close("CCCUSDT", next_timestamp, weak[-1] + 0.01) is True
 
     confirmed_signals = await engine.process(cycle_time_ms=next_timestamp, stage="confirmed")
     assert any(
@@ -286,9 +288,9 @@ async def _exercise_confirmed_persistence_behavior(tmp_path: Path) -> None:
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     next_timestamp = timestamps[-1] + settings.ticker_interval_ms
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))
@@ -356,9 +358,9 @@ async def _exercise_confirmed_summary_payload(tmp_path: Path) -> None:
     state = MarketState(settings=settings)
     timestamps = [idx * settings.ticker_interval_ms for idx in range(settings.state_window)]
     btc_prices = [20_000 + idx * 50 for idx in range(settings.state_window)]
-    strong = [100 + idx * 0.9 for idx in range(settings.state_window)]
-    base = [100 + idx * 0.5 for idx in range(settings.state_window)]
-    weak = [100 + idx * 0.2 for idx in range(settings.state_window)]
+    strong = [100 + idx * 0.03 for idx in range(settings.state_window)]
+    base = [100 + idx * 0.02 for idx in range(settings.state_window)]
+    weak = [100 + idx * 0.01 for idx in range(settings.state_window)]
 
     state.replace_history("BTCUSDT", list(zip(timestamps, btc_prices)))
     state.replace_history("AAAUSDT", list(zip(timestamps, strong)))

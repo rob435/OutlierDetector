@@ -27,3 +27,9 @@
 - Store both `stage` and `signal_kind` in SQLite because once the engine has intrabar state transitions, a single undifferentiated signal log becomes analytically useless.
 - Treat confirmed-bar persistence as a confidence upgrade, not a hard prerequisite. A first valid confirmed breakout still matters for momentum capture, so the system upgrades to `confirmed_strong` on repeated confirmed leadership instead of suppressing early confirmed signals.
 - Keep routine Telegram summaries separate from event-driven alerts. The confirmed-cycle digest exists to prove liveness and show market context; it does not change signal state or cooldown logic.
+- Treat the 1-day Telegram review as evidence that the current ranking stack is too reactive for a 3-7 day momentum objective. The next tuning pass should prioritize reducing curvature dominance, replacing raw-price momentum with percentage/log momentum, and reconsidering the dominance gate as a hard blocker.
+- Replace the BTC-vs-alt-basket dominance proxy with Binance futures BTCDOM history on `1h`, normalized into `falling / neutral / rising` using a `+-0.2%` neutral band.
+- Modulate thresholds by dominance state instead of hard-blocking signals. Dominance is now a score adjustment, not a binary veto.
+- Switch momentum to log-return normalization and reduce curvature weighting to `0.15` so the leaderboard is less sensitive to price scale and curvature noise.
+- Suppress watchlist Telegram by config if needed, but keep confirmed-cycle summaries and confirmed event alerts enabled so liveness and signal context remain visible.
+- Deduplicate confirmed summaries by cycle time so restarts do not resend an already-logged digest.

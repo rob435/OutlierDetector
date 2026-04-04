@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -25,12 +26,24 @@ def is_rate_limited_payload(payload: dict) -> bool:
 
 
 def interval_to_milliseconds(interval: str) -> int:
+    interval = interval.strip()
     if interval == "D":
         return 24 * 60 * 60 * 1000
     if interval == "W":
         return 7 * 24 * 60 * 60 * 1000
     if interval == "M":
         return 30 * 24 * 60 * 60 * 1000
+    match = re.fullmatch(r"(?i)(\d+)([mhdw])", interval)
+    if match:
+        value = int(match.group(1))
+        unit = match.group(2).lower()
+        factors = {
+            "m": 60 * 1000,
+            "h": 60 * 60 * 1000,
+            "d": 24 * 60 * 60 * 1000,
+            "w": 7 * 24 * 60 * 60 * 1000,
+        }
+        return value * factors[unit]
     return int(interval) * 60 * 1000
 
 
@@ -38,6 +51,7 @@ def interval_to_milliseconds(interval: str) -> int:
 class BootstrapPayload:
     price_history: dict[str, list[tuple[int, float]]]
     btc_daily_history: list[tuple[int, float]]
+    btcdom_history: list[tuple[int, float]]
 
 
 class BybitMarketDataClient:
@@ -68,6 +82,30 @@ class BybitMarketDataClient:
                 continue
             raise RuntimeError(f"Bybit error: {payload}")
         raise RuntimeError(f"Bybit error: exhausted retries for {path} {params}")
+
+    async def _get_binance_json(self, path: str, params: dict[str, str | int]) -> list | dict:
+        url = f"{self.settings.binance_futures_base_url.rstrip('/')}{path}"
+        retry_statuses = {418, 429}
+        for attempt in range(self.settings.rate_limit_retries + 1):
+            async with self.session.get(url, params=params, timeout=self._rest_timeout) as response:
+                if response.status in retry_statuses and attempt < self.settings.rate_limit_retries:
+                    delay = self.settings.rate_limit_backoff_seconds * (2 ** attempt)
+                    LOGGER.warning(
+                        "Binance rate limit hit for %s with params=%s. Retrying in %.1fs (%s/%s)",
+                        path,
+                        params,
+                        delay,
+                        attempt + 1,
+                        self.settings.rate_limit_retries,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                response.raise_for_status()
+                payload = await response.json()
+            if isinstance(payload, dict) and payload.get("code") not in (None, 0):
+                raise RuntimeError(f"Binance error: {payload}")
+            return payload
+        raise RuntimeError(f"Binance error: exhausted retries for {path} {params}")
 
     async def fetch_closed_klines(
         self,
@@ -120,6 +158,38 @@ class BybitMarketDataClient:
                     f"Missing {interval} candles for {symbol}: {current[0]} -> {nxt[0]}"
                 )
 
+    async def fetch_btcdom_klines(self) -> list[tuple[int, float]]:
+        symbol = self.settings.btcdom_symbol.strip().upper()
+        if symbol.endswith(".P"):
+            symbol = symbol[:-2]
+        payload = await self._get_binance_json(
+            "/fapi/v1/klines",
+            {
+                "symbol": symbol,
+                "interval": self.settings.btcdom_interval,
+                "limit": self.settings.btcdom_history_lookback + 4,
+            },
+        )
+        if not isinstance(payload, list):
+            raise RuntimeError(f"Binance error: unexpected payload for {symbol}: {payload}")
+        interval_ms = interval_to_milliseconds(self.settings.btcdom_interval)
+        now_ms = int(time.time() * 1000)
+        candles: list[tuple[int, float]] = []
+        for row in payload:
+            start_time = int(row[0])
+            close_price = float(row[4])
+            if start_time + interval_ms <= now_ms:
+                candles.append((start_time, close_price))
+        candles.sort(key=lambda item: item[0])
+        if len(candles) < self.settings.btcdom_history_lookback:
+            raise MissingCandlesError(
+                f"Unable to fetch {self.settings.btcdom_history_lookback} closed "
+                f"{self.settings.btcdom_interval} candles for {symbol}"
+            )
+        candles = candles[-self.settings.btcdom_history_lookback :]
+        self._ensure_contiguous(candles, interval_ms, symbol, self.settings.btcdom_interval)
+        return candles
+
     async def bootstrap(self) -> BootstrapPayload:
         semaphore = asyncio.Semaphore(self.settings.bootstrap_concurrency)
         price_history: dict[str, list[tuple[int, float]]] = {}
@@ -139,9 +209,11 @@ class BybitMarketDataClient:
             interval="D",
             limit=self.settings.btc_daily_lookback,
         )
+        btcdom_history = await self.fetch_btcdom_klines()
         return BootstrapPayload(
             price_history=price_history,
             btc_daily_history=btc_daily_history,
+            btcdom_history=btcdom_history,
         )
 
     async def stream_candles(

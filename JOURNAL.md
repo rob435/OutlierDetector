@@ -29,4 +29,8 @@
 - Added `signal_kind` logging so SQLite and Telegram distinguish `watchlist`, `emerging`, `confirmed`, and `none` rows instead of hiding everything under the broader processing stage.
 - Added confirmed rank persistence tracking so close-confirmed signals can upgrade to `confirmed_strong` when a ticker has held leadership across recent confirmed bars, without blocking the first confirmed breakout signal.
 - Added a separate Telegram summary on every confirmed 15m cycle so operators get the top 5 and bottom 5 ranked names even when no event-driven alert transition fires.
+- Reviewed one day of live Telegram output and wrote a detailed post-run report documenting severe confirmed-rank churn, top-to-bottom flips, duplicate summaries on restart, dominance acting as a hard signal gate, and curvature dominating too much of the leaderboard behavior.
+- Replaced the old BTC dominance proxy with Binance BTCDOM futures history on `1h`, using `BTCDOMUSDT` as the API symbol and a `+-0.2%` neutral zone for tri-state dominance.
+- Reduced curvature weight to `0.15` and switched momentum to log-return normalization so the leaderboard is less dominated by raw price scale and short-lived curvature spikes.
+- Kept the old boolean dominance flag in SQLite for compatibility, while also storing `dom_state` and `dom_change_pct` for the new tri-state macro logic.
 - Verified the implementation locally with `pytest` and `python3 -m py_compile`.

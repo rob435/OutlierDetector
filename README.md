@@ -18,7 +18,7 @@ Real-time crypto breakout detector built around Bybit V5 candle streams, volatil
 - Throttles `emerging` processing with a minimum interval so intrabar updates stay event-driven without recalculating on every raw WebSocket packet.
 - Carries candle timestamps through the queue path for `confirmed` cycles; `emerging` rows use wall-clock detection time because intrabar alerts happen before the candle is final.
 - Uses BTC daily regime as a threshold modulator, not a hard block.
-- Uses a BTC-vs-alt-basket relative-strength proxy as the dominance rotation signal. This is the honest compromise for a Bybit-only build because Bybit does not publish BTC dominance history.
+- Uses Binance BTCDOM futures history as the dominance rotation signal, normalized into `falling / neutral / rising` with a `+-0.2%` neutral zone.
 - Logs every evaluated ticker on each cycle to SQLite and optionally sends Telegram alerts with cooldown control.
 - Sends a separate Telegram summary on every confirmed 15m cycle with the top and bottom ranked names, so you can see what the engine is seeing even when no fresh signal transition fires.
 - Logs the top-ranked names each cycle so you can see the leaders even when no symbol passes the final alert filters.
@@ -27,7 +27,18 @@ Real-time crypto breakout detector built around Bybit V5 candle streams, volatil
 ## Why the implementation differs from the raw spec
 
 - `EMA200` requires more than 30 daily BTC closes. The system stores 220 BTC daily candles so the regime model is valid.
-- The spec asks for BTC dominance rotation, but Bybit market data does not provide BTC dominance history. This build uses a BTC relative-strength proxy against the tracked alt basket so the system stays deployable without a second paid data source.
+- The spec asks for BTC dominance rotation. The current build uses Binance BTCDOM futures history as a practical public proxy, not literal spot market-cap dominance.
+
+## Next Tuning Pass
+
+The 1-day Telegram review showed that the engine is still too reactive for a 3-7 day momentum objective. The current tuning priorities are:
+
+- Observe the Binance BTCDOM replacement in live conditions and decide whether the dominance adjustment is still too strong or too weak.
+- Keep curvature capped at `0.15` so it behaves like a timing aid, not a rank driver.
+- Keep log-momentum normalization so cross-sectional comparisons are less distorted by nominal price level.
+- Keep confirmed ranking slightly persistence-biased so one-bar spikes stop dominating the 15m summary.
+- Disable watchlist Telegram by config if the feed becomes too noisy; keep confirmed summaries and stronger event alerts on Telegram.
+- Keep duplicate confirmed-summary suppression keyed by cycle time so restarts do not resend the same digest.
 
 ## Layout
 

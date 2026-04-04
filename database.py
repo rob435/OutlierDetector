@@ -22,6 +22,8 @@ class SignalRecord:
     rank: int
     persistence_hits: int
     dom_falling: bool
+    dom_state: str
+    dom_change_pct: float
 
 
 class SignalDatabase:
@@ -52,7 +54,9 @@ class SignalDatabase:
                 price REAL NOT NULL DEFAULT 0,
                 rank INTEGER NOT NULL DEFAULT 0,
                 persistence_hits INTEGER NOT NULL DEFAULT 0,
-                dom_falling INTEGER NOT NULL DEFAULT 0
+                dom_falling INTEGER NOT NULL DEFAULT 0,
+                dom_state TEXT NOT NULL DEFAULT 'neutral',
+                dom_change_pct REAL NOT NULL DEFAULT 0
             )
             """
         )
@@ -76,7 +80,26 @@ class SignalDatabase:
                 "ALTER TABLE signals ADD COLUMN persistence_hits INTEGER NOT NULL DEFAULT 0"
             )
         if "dom_falling" not in existing_columns:
-            self._conn.execute("ALTER TABLE signals ADD COLUMN dom_falling INTEGER NOT NULL DEFAULT 0")
+            self._conn.execute(
+                "ALTER TABLE signals ADD COLUMN dom_falling INTEGER NOT NULL DEFAULT 0"
+            )
+        if "dom_state" not in existing_columns:
+            self._conn.execute(
+                "ALTER TABLE signals ADD COLUMN dom_state TEXT NOT NULL DEFAULT 'neutral'"
+            )
+        if "dom_change_pct" not in existing_columns:
+            self._conn.execute(
+                "ALTER TABLE signals ADD COLUMN dom_change_pct REAL NOT NULL DEFAULT 0"
+            )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS summary_cycles (
+                stage TEXT NOT NULL,
+                cycle_time_ms INTEGER NOT NULL,
+                PRIMARY KEY (stage, cycle_time_ms)
+            )
+            """
+        )
         self._conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_signals_ticker_timestamp
@@ -116,9 +139,11 @@ class SignalDatabase:
                 price,
                 rank,
                 persistence_hits,
-                dom_falling
+                dom_falling,
+                dom_state,
+                dom_change_pct
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -136,11 +161,27 @@ class SignalDatabase:
                     record.rank,
                     record.persistence_hits,
                     int(record.dom_falling),
+                    record.dom_state,
+                    record.dom_change_pct,
                 )
                 for record in records
             ],
         )
         self._conn.commit()
+
+    async def record_summary_cycle(self, stage: str, cycle_time_ms: int) -> bool:
+        return await asyncio.to_thread(self._record_summary_cycle_sync, stage, cycle_time_ms)
+
+    def _record_summary_cycle_sync(self, stage: str, cycle_time_ms: int) -> bool:
+        cursor = self._conn.execute(
+            """
+            INSERT OR IGNORE INTO summary_cycles (stage, cycle_time_ms)
+            VALUES (?, ?)
+            """,
+            (stage, cycle_time_ms),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
 
     def close(self) -> None:
         self._conn.close()

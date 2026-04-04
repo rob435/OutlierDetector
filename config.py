@@ -51,11 +51,17 @@ class Settings:
     bybit_rest_base_url: str = "https://api.bybit.com"
     bybit_ws_base_url: str = "wss://stream.bybit.com/v5/public/linear"
     bybit_category: str = "linear"
+    binance_futures_base_url: str = "https://fapi.binance.com"
     candle_interval: str = "15"
     candle_interval_minutes: int = 15
     state_window: int = 288
     btc_daily_lookback: int = 220
     btc_vol_lookback: int = 30
+    btcdom_symbol: str = "BTCDOMUSDT"
+    btcdom_interval: str = "1h"
+    btcdom_history_lookback: int = 96
+    btcdom_state_lookback_bars: int = 4
+    btcdom_neutral_threshold_pct: float = 0.002
     momentum_lookback: int = 48
     momentum_skip: int = 4
     curvature_ma_window: int = 8
@@ -72,9 +78,15 @@ class Settings:
     telegram_summary_enabled: bool = True
     summary_top_n: int = 5
     summary_bottom_n: int = 5
+    momentum_weight: float = 0.85
+    curvature_weight: float = 0.15
+    momentum_z_clip: float = 3.0
+    curvature_z_clip: float = 2.5
+    confirmed_stability_weight: float = 0.25
     cooldown_hours: int = 12
     emerging_cooldown_minutes: int = 60
     watchlist_cooldown_minutes: int = 30
+    watchlist_telegram_enabled: bool = False
     emerging_min_observations: int = 3
     emerging_min_rank_improvement: int = 2
     min_volatility: float = 1e-5
@@ -97,6 +109,9 @@ class Settings:
     universe: list[str] = field(default_factory=lambda: list(DEFAULT_UNIVERSE))
     regime_thresholds: dict[int, float | None] = field(
         default_factory=lambda: {3: 0.5, 2: 0.8, 1: 1.2, 0: None}
+    )
+    dominance_score_adjustments: dict[int, float] = field(
+        default_factory=lambda: {-1: -0.15, 0: 0.0, 1: 0.35}
     )
 
     @property
@@ -129,11 +144,19 @@ def load_settings() -> Settings:
             "BYBIT_WS_BASE_URL", "wss://stream.bybit.com/v5/public/linear"
         ),
         bybit_category=os.getenv("BYBIT_CATEGORY", "linear"),
+        binance_futures_base_url=os.getenv(
+            "BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com"
+        ),
         candle_interval=os.getenv("CANDLE_INTERVAL", "15"),
         candle_interval_minutes=_get_int("CANDLE_INTERVAL_MINUTES", 15),
         state_window=_get_int("STATE_WINDOW", 288),
         btc_daily_lookback=_get_int("BTC_DAILY_LOOKBACK", 220),
         btc_vol_lookback=_get_int("BTC_VOL_LOOKBACK", 30),
+        btcdom_symbol=os.getenv("BTCDOM_SYMBOL", "BTCDOMUSDT").upper(),
+        btcdom_interval=os.getenv("BTCDOM_INTERVAL", "1h"),
+        btcdom_history_lookback=_get_int("BTCDOM_HISTORY_LOOKBACK", 96),
+        btcdom_state_lookback_bars=_get_int("BTCDOM_STATE_LOOKBACK_BARS", 4),
+        btcdom_neutral_threshold_pct=_get_float("BTCDOM_NEUTRAL_THRESHOLD_PCT", 0.002),
         momentum_lookback=_get_int("MOMENTUM_LOOKBACK", 48),
         momentum_skip=_get_int("MOMENTUM_SKIP", 4),
         curvature_ma_window=_get_int("CURVATURE_MA_WINDOW", 8),
@@ -150,9 +173,15 @@ def load_settings() -> Settings:
         telegram_summary_enabled=_get_bool("TELEGRAM_SUMMARY_ENABLED", True),
         summary_top_n=_get_int("SUMMARY_TOP_N", 5),
         summary_bottom_n=_get_int("SUMMARY_BOTTOM_N", 5),
+        momentum_weight=_get_float("MOMENTUM_WEIGHT", 0.85),
+        curvature_weight=_get_float("CURVATURE_WEIGHT", 0.15),
+        momentum_z_clip=_get_float("MOMENTUM_Z_CLIP", 3.0),
+        curvature_z_clip=_get_float("CURVATURE_Z_CLIP", 2.5),
+        confirmed_stability_weight=_get_float("CONFIRMED_STABILITY_WEIGHT", 0.25),
         cooldown_hours=_get_int("COOLDOWN_HOURS", 12),
         emerging_cooldown_minutes=_get_int("EMERGING_COOLDOWN_MINUTES", 60),
         watchlist_cooldown_minutes=_get_int("WATCHLIST_COOLDOWN_MINUTES", 30),
+        watchlist_telegram_enabled=_get_bool("WATCHLIST_TELEGRAM_ENABLED", False),
         emerging_min_observations=_get_int("EMERGING_MIN_OBSERVATIONS", 3),
         emerging_min_rank_improvement=_get_int("EMERGING_MIN_RANK_IMPROVEMENT", 2),
         min_volatility=_get_float("MIN_VOLATILITY", 1e-5),

@@ -36,7 +36,8 @@ class SummaryPayload:
     stage: str
     cycle_time_ms: int
     regime_score: int
-    dom_falling: bool
+    dom_state: str
+    dom_change_pct: float
     top_rankings: list[SummaryEntry]
     bottom_rankings: list[SummaryEntry]
     qualified_signals: list[str]
@@ -113,7 +114,8 @@ class TelegramNotifier:
             f"15m confirmed summary\n"
             f"Cycle time: {payload.cycle_time_ms}\n"
             f"BTC regime: {payload.regime_score}\n"
-            f"Dominance falling: {'yes' if payload.dom_falling else 'no'}\n"
+            f"Dominance state: {payload.dom_state}\n"
+            f"Dominance change: {payload.dom_change_pct * 100:.2f}%\n"
             f"Qualified signals:\n{qualified_lines}\n"
             f"Top {len(payload.top_rankings)}:\n{top_lines}\n"
             f"Bottom {len(payload.bottom_rankings)}:\n{bottom_lines}"

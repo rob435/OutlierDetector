@@ -7,6 +7,7 @@ from datetime import datetime
 import numpy as np
 
 from config import Settings
+from indicators import dominance_state
 
 
 class CandleGapError(RuntimeError):
@@ -16,9 +17,12 @@ class CandleGapError(RuntimeError):
 @dataclass(slots=True)
 class GlobalState:
     btc_daily_closes: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    btcdom_closes: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     btc_regime_score: int = 0
     btc_dominance_series: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     dom_falling: int = 1
+    btcdom_state: int = 0
+    btcdom_change_pct: float = 0.0
 
 
 @dataclass(slots=True)
@@ -94,6 +98,11 @@ class MarketState:
         for close_time_ms, close_price in candles:
             times.append(close_time_ms)
             prices.append(close_price)
+
+    def replace_btcdom_history(self, candles: list[tuple[int, float]]) -> None:
+        self.global_state.btcdom_closes = np.asarray([close for _, close in candles], dtype=float)
+        self.global_state.btc_dominance_series = self.global_state.btcdom_closes
+        self.refresh_btcdom_state()
 
     def append_close(self, symbol: str, close_time_ms: int, close_price: float) -> bool:
         times = self.close_times_ms[symbol]
@@ -190,6 +199,18 @@ class MarketState:
         if symbol not in self.confirmed_observations:
             return
         self.confirmed_observations[symbol].clear()
+
+    def refresh_btcdom_state(self) -> None:
+        closes = self.global_state.btcdom_closes
+        state, change_pct = dominance_state(
+            closes,
+            ema_period=self.settings.btcdom_ema_period,
+            lag=self.settings.btcdom_state_lookback_bars,
+            neutral_threshold_pct=self.settings.btcdom_neutral_threshold_pct,
+        )
+        self.global_state.btcdom_state = state
+        self.global_state.btcdom_change_pct = change_pct
+        self.global_state.dom_falling = int(state < 0)
 
     def record_confirmed_observation(
         self,

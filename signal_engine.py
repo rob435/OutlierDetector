@@ -11,10 +11,9 @@ from config import Settings
 from database import SignalDatabase, SignalRecord
 from indicators import (
     btc_regime_score,
+    clip_value,
     cross_sectional_zscores,
     curvature_signal,
-    dominance_proxy_series,
-    dominance_rotation_signal,
     hurst_exponent,
     log_returns,
     volatility_adjusted_momentum,
@@ -80,6 +79,22 @@ class SignalEngine:
             "emerging": [],
         }
 
+    def _dominance_label(self, dominance_state: int) -> str:
+        if dominance_state < 0:
+            return "falling"
+        if dominance_state > 0:
+            return "rising"
+        return "neutral"
+
+    def _confirmed_stability_bonus(self, ticker: str) -> float:
+        window = max(self.settings.confirmed_persistence_window, 1)
+        observations = list(self.state.confirmed_observations[ticker])
+        if not observations:
+            return 0.0
+        qualified_hits = sum(1 for observation in observations if observation.qualified)
+        persistence_ratio = qualified_hits / window
+        return self.settings.confirmed_stability_weight * persistence_ratio
+
     def _compute_metrics(self, stage: str) -> dict[str, TickerMetrics]:
         include_provisional = stage == "emerging"
         metrics: dict[str, TickerMetrics] = {}
@@ -120,9 +135,22 @@ class SignalEngine:
             {ticker: item.curvature_raw for ticker, item in metrics.items()}
         )
         for ticker, item in metrics.items():
-            item.momentum_z = momentum_z[ticker]
-            item.curvature_z = curvature_z[ticker]
-            item.composite_score = item.momentum_z + item.curvature_z
+            item.momentum_z = clip_value(
+                momentum_z[ticker],
+                -self.settings.momentum_z_clip,
+                self.settings.momentum_z_clip,
+            )
+            item.curvature_z = clip_value(
+                curvature_z[ticker],
+                -self.settings.curvature_z_clip,
+                self.settings.curvature_z_clip,
+            )
+            item.composite_score = (
+                (self.settings.momentum_weight * item.momentum_z)
+                + (self.settings.curvature_weight * item.curvature_z)
+            )
+            if stage == "confirmed":
+                item.composite_score += self._confirmed_stability_bonus(ticker)
 
         ranked = sorted(metrics.values(), key=lambda item: item.composite_score, reverse=True)
         for idx, item in enumerate(ranked, start=1):
@@ -201,7 +229,8 @@ class SignalEngine:
             stage=stage,
             cycle_time_ms=cycle_time_ms,
             regime_score=self.state.global_state.btc_regime_score,
-            dom_falling=bool(self.state.global_state.dom_falling),
+            dom_state=self._dominance_label(self.state.global_state.btcdom_state),
+            dom_change_pct=self.state.global_state.btcdom_change_pct,
             top_rankings=top_rankings,
             bottom_rankings=bottom_rankings,
             qualified_signals=qualified_signals,
@@ -213,30 +242,21 @@ class SignalEngine:
             vol_lookback=self.settings.btc_vol_lookback,
             vol_threshold=self.settings.btc_realized_vol_threshold,
         )
-        btc_prices = self.state.get_prices("BTCUSDT", include_provisional=include_provisional)
-        alt_vectors = [
-            self.state.get_prices(symbol, include_provisional=include_provisional)
-            for symbol in self.settings.universe
-        ]
-        dominance_series = dominance_proxy_series(btc_prices=btc_prices, alt_price_vectors=alt_vectors)
-        dom_falling = dominance_rotation_signal(dominance_series)
-
         self.state.global_state.btc_regime_score = regime_score
-        self.state.global_state.btc_dominance_series = dominance_series
-        self.state.global_state.dom_falling = dom_falling
-        return regime_score, dom_falling
+        dominance_state = self.state.global_state.btcdom_state
+        self.state.global_state.btc_dominance_series = self.state.global_state.btcdom_closes
+        self.state.global_state.dom_falling = int(dominance_state < 0)
+        return regime_score, dominance_state
 
     def _passes_core_filters(
         self,
         item: TickerMetrics,
-        dom_falling: int,
         min_score: float | None,
     ) -> bool:
-        return bool(
-            item.hurst > self.settings.hurst_cutoff
-            and dom_falling == 1
-            and (min_score is None or item.composite_score >= min_score)
-        )
+        return bool(item.hurst > self.settings.hurst_cutoff and (min_score is None or item.composite_score >= min_score))
+
+    def _dominance_score_adjustment(self, dominance_state: int) -> float:
+        return self.settings.dominance_score_adjustments.get(dominance_state, 0.0)
 
     def _is_strengthening_intrabar(self, ticker: str) -> bool:
         observations = list(self.state.intrabar_observations[ticker])
@@ -261,10 +281,9 @@ class SignalEngine:
         ticker: str,
         item: TickerMetrics,
         observed_at_ms: int,
-        dom_falling: int,
         min_score: float | None,
     ) -> str:
-        if not self._passes_core_filters(item, dom_falling, min_score):
+        if not self._passes_core_filters(item, min_score):
             self.state.reset_intrabar(ticker)
             return "none"
         if item.rank > self.settings.watchlist_top_n:
@@ -285,11 +304,10 @@ class SignalEngine:
         ticker: str,
         item: TickerMetrics,
         observed_at_ms: int,
-        dom_falling: int,
         min_score: float | None,
     ) -> tuple[str, int]:
         persistence_qualified = bool(
-            self._passes_core_filters(item, dom_falling, min_score)
+            self._passes_core_filters(item, min_score)
             and item.rank <= self.settings.confirmed_persistence_rank
         )
         self.state.record_confirmed_observation(
@@ -300,7 +318,7 @@ class SignalEngine:
             qualified=persistence_qualified,
         )
         base_confirmed = bool(
-            self._passes_core_filters(item, dom_falling, min_score)
+            self._passes_core_filters(item, min_score)
             and item.rank <= self.settings.top_n
         )
         observations = list(self.state.confirmed_observations[ticker])
@@ -321,8 +339,11 @@ class SignalEngine:
         if not metrics:
             return []
 
-        regime_score, dom_falling = self._compute_regime(include_provisional=include_provisional)
+        regime_score, dominance_state = self._compute_regime(include_provisional=include_provisional)
         min_score = self.settings.regime_thresholds.get(regime_score)
+        dominance_adjustment = self._dominance_score_adjustment(dominance_state)
+        if min_score is not None:
+            min_score = min_score + dominance_adjustment
         ranked_signals: list[RankedSignal] = []
         records: list[SignalRecord] = []
         now = (
@@ -335,6 +356,9 @@ class SignalEngine:
             )
         )
         observed_at_ms = int(now.timestamp() * 1000)
+        dom_falling = dominance_state < 0
+        dom_state = self._dominance_label(dominance_state)
+        dom_change_pct = self.state.global_state.btcdom_change_pct
         for ticker, item in sorted(metrics.items(), key=lambda pair: pair[1].rank):
             persistence_hits = 0
             if stage == "emerging":
@@ -342,7 +366,6 @@ class SignalEngine:
                     ticker=ticker,
                     item=item,
                     observed_at_ms=observed_at_ms,
-                    dom_falling=dom_falling,
                     min_score=min_score,
                 )
                 should_signal = signal_kind != "none"
@@ -361,13 +384,14 @@ class SignalEngine:
                     and signal_kind != previous_kind
                     and (last_alerted is None or now - last_alerted >= cooldown)
                 )
+                if signal_kind == "watchlist" and not self.settings.watchlist_telegram_enabled:
+                    eligible_to_alert = False
                 self.state.intrabar_state[ticker] = signal_kind if should_signal else "neutral"
             else:
                 signal_kind, persistence_hits = self._classify_confirmed_signal(
                     ticker=ticker,
                     item=item,
                     observed_at_ms=observed_at_ms,
-                    dom_falling=dom_falling,
                     min_score=min_score,
                 )
                 should_signal = signal_kind in {"confirmed", "confirmed_strong"}
@@ -399,7 +423,9 @@ class SignalEngine:
                         price=item.current_price,
                         rank=item.rank,
                         persistence_hits=persistence_hits,
-                        dom_falling=bool(dom_falling),
+                        dom_falling=dom_falling,
+                        dom_state=dom_state,
+                        dom_change_pct=dom_change_pct,
                     )
                 )
                 continue
@@ -462,7 +488,9 @@ class SignalEngine:
                     price=item.current_price,
                     rank=item.rank,
                     persistence_hits=persistence_hits,
-                    dom_falling=bool(dom_falling),
+                    dom_falling=dom_falling,
+                    dom_state=dom_state,
+                    dom_change_pct=dom_change_pct,
                 )
             )
         await self.database.log_signals(records)

@@ -41,13 +41,13 @@ def volatility_adjusted_momentum(
     required = lookback + skip + 1
     if prices.size < required or returns.size < lookback + skip:
         return float("nan")
-    momentum = prices[-skip] - prices[-(lookback + skip)]
     vol_slice = returns[-(lookback + skip) : -skip] if skip > 0 else returns[-lookback:]
     if vol_slice.size == 0:
         return float("nan")
     volatility = float(np.std(vol_slice, ddof=1)) if vol_slice.size > 1 else 0.0
     if not math.isfinite(volatility) or volatility < floor:
         volatility = floor
+    momentum = float(np.log(prices[-skip] / prices[-(lookback + skip)]))
     return float(momentum / volatility)
 
 
@@ -184,6 +184,31 @@ def dominance_rotation_signal(series: np.ndarray, ema_period: int = 5, lag: int 
         return 1
     ema_series = ema(series, ema_period)
     return int(ema_series[-1] < ema_series[-lag])
+
+
+def dominance_state(
+    series: np.ndarray,
+    ema_period: int = 5,
+    lag: int = 4,
+    neutral_threshold_pct: float = 0.002,
+) -> tuple[int, float]:
+    series = np.asarray(series, dtype=float)
+    if series.size < max(lag + 1, ema_period + 1):
+        return 0, 0.0
+    ema_series = ema(series, ema_period)
+    base_value = float(ema_series[-lag])
+    if not math.isfinite(base_value) or base_value == 0.0:
+        return 0, 0.0
+    change_pct = float((ema_series[-1] / base_value) - 1.0)
+    if change_pct <= -neutral_threshold_pct:
+        return -1, change_pct
+    if change_pct >= neutral_threshold_pct:
+        return 1, change_pct
+    return 0, change_pct
+
+
+def clip_value(value: float, floor: float, ceiling: float) -> float:
+    return float(np.clip(value, floor, ceiling))
 
 
 def zscore(values: np.ndarray) -> np.ndarray:
