@@ -36,3 +36,4 @@
 - Promote the current runtime behavior into a canonical written specification in `SPEC.md` so the repo no longer depends on an implied or historical spec.
 - Treat the second Telegram review as evidence that the momentum/log-normalization and weaker-curvature refactor materially improved short-horizon ranking stability. Do not cut curvature further yet; the next likely tuning target is macro information content and confirmed stability behavior, not another immediate ranking rewrite.
 - Add `entry_ready` as the trader-facing midpoint entry tier between `emerging` and `confirmed`, and give it explicit knobs so operators can keep it tighter than broad emerging context without turning it into a close-only filter.
+- Keep repo hygiene strict: ignore local runtime artifacts, prefer clean git-based VPS deployment over `scp` of a dirty working tree, and remove dead compatibility shims instead of letting them rot.

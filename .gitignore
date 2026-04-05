@@ -2,7 +2,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.DS_Store
+.mypy_cache/
+.ruff_cache/
 .env
+data/
 signals.sqlite3
 *.db
 *.sqlite

@@ -29,6 +29,7 @@
 - `SPEC.md` now exists as the canonical source-of-truth specification for the current runtime behavior.
 - A second Telegram review is now documented in `TELEGRAM_TEST_REPORT_2026-04-05.md`; the immediate top-to-bottom flip problem appears largely fixed in that window, but BTC regime stayed flat at `1` and some symbols still hit both extremes over the full day.
 - The operator surface now exposes `entry_ready` as the midpoint intrabar entry tier, with explicit `ENTRY_READY_*` knobs and report/Telegram wording that distinguishes it from both broad `emerging` context and close-confirmed `confirmed` signals.
+- Repo hygiene is improved: ignore rules now cover common local junk, report output sections render in the correct order, and the stale `alerts.py` compatibility shim has been removed.
 
 ## Remaining risks
 

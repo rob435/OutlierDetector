@@ -42,3 +42,4 @@
 - Added a real `entry_ready` signal kind between `emerging` and `confirmed`, with its own tighter intrabar thresholds for earlier tradeable candidates.
 - Kept the implementation honest: the new tier still rides on the existing intrabar lifecycle, but it is now emitted directly by the signal path instead of existing only as wording.
 - Added explicit `ENTRY_READY_*` env knobs so the midpoint tier can be tuned separately from broad `emerging` context without waiting for the 15m close.
+- Cleaned the repo contract: aligned env templates and spec defaults with the real `entry_ready` runtime values, fixed the report section ordering, removed the dead `alerts.py` shim, and tightened deployment notes so VPS setup uses a clean git checkout instead of copying a dirty local tree.

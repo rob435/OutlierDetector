@@ -1,20 +1,20 @@
 # Soak Run
 
 Use this workflow for the first production-like validation on the VPS.
+Do not deploy by copying a dirty local working tree full of SQLite files and caches.
 
 ## 1. Prepare host
 
 ```bash
-sudo mkdir -p /opt/outlier-detector
-sudo chown -R "$USER":"$USER" /opt/outlier-detector
+sudo mkdir -p /opt
+cd /opt
+git clone https://github.com/rob435/OutlierDetector.git outlier-detector
 cd /opt/outlier-detector
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 mkdir -p data
 ```
-
-Copy the repo contents into `/opt/outlier-detector`.
 
 ## 2. Prepare environment
 
@@ -30,6 +30,8 @@ Replace:
 - `TELEGRAM_CHAT_ID`
 
 Use a rotated Telegram bot token, not the one previously pasted into chat.
+
+If you tune `.env`, restart the service after the change. `systemd` will not magically reload environment files.
 
 ## 3. Preflight checks
 
@@ -96,6 +98,14 @@ Then monitor:
 
 ```bash
 journalctl -u outlier-detector -f
+```
+
+Basic control commands:
+
+```bash
+sudo systemctl restart outlier-detector
+sudo systemctl status outlier-detector --no-pager
+journalctl -u outlier-detector -n 100 --no-pager
 ```
 
 ## 7. Stop conditions

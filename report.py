@@ -142,15 +142,14 @@ def format_report(summary: ReportSummary) -> str:
         f"Alerted rows: {summary.alerted_rows}",
         f"First timestamp: {summary.first_timestamp or 'n/a'}",
         f"Last timestamp: {summary.last_timestamp or 'n/a'}",
-        "Stage rows:",
-        "Signal kinds:",
-        "Top tickers:",
     ]
+    lines.append("Stage rows:")
     if not summary.stage_counts:
         lines.append("  none")
     else:
         for stage, total_rows, alerted_rows in summary.stage_counts:
             lines.append(f"  {stage}: rows={total_rows} alerts={alerted_rows}")
+    lines.append("Signal kinds:")
     if not summary.signal_kind_counts:
         lines.append("  none")
     else:
@@ -163,6 +162,7 @@ def format_report(summary: ReportSummary) -> str:
         )
         for signal_kind, total_rows, alerted_rows in ordered_signal_kinds:
             lines.append(f"  {signal_kind}: rows={total_rows} alerts={alerted_rows}")
+    lines.append("Top tickers:")
     if not summary.top_tickers:
         lines.append("  none")
     else:

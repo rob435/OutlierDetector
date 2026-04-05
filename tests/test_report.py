@@ -58,7 +58,6 @@ def test_load_report_summary_aggregates_signal_rows(tmp_path: Path) -> None:
 
 
 def test_format_report_renders_expected_sections() -> None:
-    summary = load_report_summary.__annotations__  # type: ignore[assignment]
     rendered = format_report(
         type("Summary", (), {
             "total_rows": 2,
@@ -76,3 +75,6 @@ def test_format_report_renders_expected_sections() -> None:
     assert "emerging: rows=1 alerts=0" in rendered
     assert "watchlist: rows=1 alerts=0" in rendered
     assert "AAAUSDT: rows=2 alerts=1" in rendered
+    assert rendered.index("Stage rows:") < rendered.index("  confirmed: rows=1 alerts=1")
+    assert rendered.index("Signal kinds:") < rendered.index("  watchlist: rows=1 alerts=0")
+    assert rendered.index("Top tickers:") < rendered.index("  AAAUSDT: rows=2 alerts=1 avg_composite=1.250 max_composite=2.500")
