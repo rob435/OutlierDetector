@@ -33,3 +33,6 @@
 - Switch momentum to log-return normalization and reduce curvature weighting to `0.15` so the leaderboard is less sensitive to price scale and curvature noise.
 - Suppress watchlist Telegram by config if needed, but keep confirmed-cycle summaries and confirmed event alerts enabled so liveness and signal context remain visible.
 - Deduplicate confirmed summaries by cycle time so restarts do not resend an already-logged digest.
+- Promote the current runtime behavior into a canonical written specification in `SPEC.md` so the repo no longer depends on an implied or historical spec.
+- Treat the second Telegram review as evidence that the momentum/log-normalization and weaker-curvature refactor materially improved short-horizon ranking stability. Do not cut curvature further yet; the next likely tuning target is macro information content and confirmed stability behavior, not another immediate ranking rewrite.
+- Add `entry_ready` as the trader-facing midpoint entry tier between `emerging` and `confirmed`, and give it explicit knobs so operators can keep it tighter than broad emerging context without turning it into a close-only filter.

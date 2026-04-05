@@ -6,6 +6,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+SIGNAL_KIND_ORDER = {
+    "watchlist": 0,
+    "emerging": 1,
+    "entry_ready": 2,
+    "confirmed": 3,
+    "confirmed_strong": 4,
+    "none": 5,
+}
+
+SIGNAL_KIND_LABELS = {
+    "watchlist": "broad intrabar context",
+    "emerging": "building intrabar setup",
+    "entry_ready": "midpoint intrabar entry candidate",
+    "confirmed": "close-confirmed breakout",
+    "confirmed_strong": "persistent close-confirmed breakout",
+    "none": "no signal",
+}
+
+
 @dataclass(slots=True)
 class ReportSummary:
     total_rows: int
@@ -135,7 +154,14 @@ def format_report(summary: ReportSummary) -> str:
     if not summary.signal_kind_counts:
         lines.append("  none")
     else:
-        for signal_kind, total_rows, alerted_rows in summary.signal_kind_counts:
+        lines.append("  legend:")
+        for signal_kind in ("watchlist", "emerging", "entry_ready", "confirmed", "confirmed_strong"):
+            lines.append(f"    {signal_kind}: {SIGNAL_KIND_LABELS[signal_kind]}")
+        ordered_signal_kinds = sorted(
+            summary.signal_kind_counts,
+            key=lambda item: (SIGNAL_KIND_ORDER.get(item[0], 99), item[0]),
+        )
+        for signal_kind, total_rows, alerted_rows in ordered_signal_kinds:
             lines.append(f"  {signal_kind}: rows={total_rows} alerts={alerted_rows}")
     if not summary.top_tickers:
         lines.append("  none")

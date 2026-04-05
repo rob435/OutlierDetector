@@ -183,9 +183,13 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
         watchlist_telegram_enabled=True,
         top_n=1,
         emerging_top_n=1,
+        entry_ready_top_n=1,
         watchlist_top_n=5,
         emerging_min_observations=3,
         emerging_min_rank_improvement=2,
+        entry_ready_min_observations=5,
+        entry_ready_min_rank_improvement=2,
+        entry_ready_min_composite_gain=0.01,
         regime_thresholds={0: None, 1: None, 2: None, 3: None},
     )
     state = MarketState(settings=settings)
@@ -249,8 +253,26 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
     )
     assert notifier.kinds == ["watchlist", "emerging"]
 
+    state.intrabar_observations["AAAUSDT"] = deque(
+        [
+            IntrabarObservation(observed_at_ms=next_timestamp - 40_000, rank=4, composite_score=0.05),
+            IntrabarObservation(observed_at_ms=next_timestamp - 30_000, rank=3, composite_score=0.10),
+            IntrabarObservation(observed_at_ms=next_timestamp - 20_000, rank=2, composite_score=0.15),
+            IntrabarObservation(observed_at_ms=next_timestamp - 10_000, rank=1, composite_score=0.20),
+        ],
+        maxlen=state.intrabar_observations["AAAUSDT"].maxlen,
+    )
+
+    assert state.update_provisional("AAAUSDT", next_timestamp, strong[-1] + 2.5) is True
+    entry_ready_signals = await engine.process(cycle_time_ms=next_timestamp + 40_000, stage="emerging")
+    assert any(
+        signal.ticker == "AAAUSDT" and signal.signal_kind == "entry_ready"
+        for signal in entry_ready_signals
+    )
+    assert notifier.kinds == ["watchlist", "emerging", "entry_ready"]
+
     assert state.append_close("BTCUSDT", next_timestamp, btc_prices[-1] + 50.0) is True
-    assert state.append_close("AAAUSDT", next_timestamp, strong[-1] + 2.0) is True
+    assert state.append_close("AAAUSDT", next_timestamp, strong[-1] + 2.5) is True
     assert state.append_close("BBBUSDT", next_timestamp, base[-1] + 0.02) is True
     assert state.append_close("CCCUSDT", next_timestamp, weak[-1] + 0.01) is True
 
@@ -259,7 +281,7 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
         signal.ticker == "AAAUSDT" and signal.signal_kind == "confirmed"
         for signal in confirmed_signals
     )
-    assert notifier.kinds == ["watchlist", "emerging", "confirmed"]
+    assert notifier.kinds == ["watchlist", "emerging", "entry_ready", "confirmed"]
 
     with sqlite3.connect(settings.sqlite_path) as connection:
         kind_counts = dict(
@@ -269,6 +291,7 @@ async def _exercise_emerging_transition_behavior(tmp_path: Path) -> None:
         )
         assert kind_counts["watchlist"] >= 1
         assert kind_counts["emerging"] >= 1
+        assert kind_counts["entry_ready"] >= 1
         assert kind_counts["confirmed"] >= 1
 
 

@@ -73,7 +73,8 @@ class TelegramNotifier:
     async def send(self, payload: AlertPayload) -> bool:
         labels = {
             "watchlist": "watchlist candidate",
-            "emerging": "emerging breakout candidate",
+            "emerging": "emerging setup",
+            "entry_ready": "midpoint intrabar entry candidate",
             "confirmed": "confirmed breakout candidate",
             "confirmed_strong": "persistent confirmed breakout candidate",
         }

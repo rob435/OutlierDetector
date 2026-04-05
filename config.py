@@ -72,6 +72,7 @@ class Settings:
     top_n: int = 3
     watchlist_top_n: int = 8
     emerging_top_n: int = 5
+    entry_ready_top_n: int = 4
     confirmed_persistence_window: int = 3
     confirmed_persistence_min_hits: int = 2
     confirmed_persistence_rank: int = 3
@@ -87,9 +88,13 @@ class Settings:
     cooldown_hours: int = 12
     emerging_cooldown_minutes: int = 60
     watchlist_cooldown_minutes: int = 30
+    entry_ready_cooldown_minutes: int = 15
     watchlist_telegram_enabled: bool = False
     emerging_min_observations: int = 3
     emerging_min_rank_improvement: int = 2
+    entry_ready_min_observations: int = 4
+    entry_ready_min_rank_improvement: int = 2
+    entry_ready_min_composite_gain: float = 0.02
     min_volatility: float = 1e-5
     btc_realized_vol_threshold: float = 0.65
     bootstrap_concurrency: int = 8
@@ -168,6 +173,7 @@ def load_settings() -> Settings:
         top_n=_get_int("TOP_N", 3),
         watchlist_top_n=_get_int("WATCHLIST_TOP_N", 8),
         emerging_top_n=_get_int("EMERGING_TOP_N", 5),
+        entry_ready_top_n=_get_int("ENTRY_READY_TOP_N", 4),
         confirmed_persistence_window=_get_int("CONFIRMED_PERSISTENCE_WINDOW", 3),
         confirmed_persistence_min_hits=_get_int("CONFIRMED_PERSISTENCE_MIN_HITS", 2),
         confirmed_persistence_rank=_get_int("CONFIRMED_PERSISTENCE_RANK", 3),
@@ -183,9 +189,13 @@ def load_settings() -> Settings:
         cooldown_hours=_get_int("COOLDOWN_HOURS", 12),
         emerging_cooldown_minutes=_get_int("EMERGING_COOLDOWN_MINUTES", 60),
         watchlist_cooldown_minutes=_get_int("WATCHLIST_COOLDOWN_MINUTES", 30),
+        entry_ready_cooldown_minutes=_get_int("ENTRY_READY_COOLDOWN_MINUTES", 15),
         watchlist_telegram_enabled=_get_bool("WATCHLIST_TELEGRAM_ENABLED", False),
         emerging_min_observations=_get_int("EMERGING_MIN_OBSERVATIONS", 3),
         emerging_min_rank_improvement=_get_int("EMERGING_MIN_RANK_IMPROVEMENT", 2),
+        entry_ready_min_observations=_get_int("ENTRY_READY_MIN_OBSERVATIONS", 4),
+        entry_ready_min_rank_improvement=_get_int("ENTRY_READY_MIN_RANK_IMPROVEMENT", 2),
+        entry_ready_min_composite_gain=_get_float("ENTRY_READY_MIN_COMPOSITE_GAIN", 0.02),
         min_volatility=_get_float("MIN_VOLATILITY", 1e-5),
         btc_realized_vol_threshold=_get_float("BTC_REALIZED_VOL_THRESHOLD", 0.65),
         bootstrap_concurrency=_get_int("BOOTSTRAP_CONCURRENCY", 8),

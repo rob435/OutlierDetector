@@ -258,14 +258,29 @@ class SignalEngine:
     def _dominance_score_adjustment(self, dominance_state: int) -> float:
         return self.settings.dominance_score_adjustments.get(dominance_state, 0.0)
 
-    def _is_strengthening_intrabar(self, ticker: str) -> bool:
+    def _is_strengthening_intrabar(
+        self,
+        ticker: str,
+        min_observations: int | None = None,
+        min_rank_improvement: int | None = None,
+        min_composite_gain: float = 0.0,
+    ) -> bool:
         observations = list(self.state.intrabar_observations[ticker])
-        min_observations = self.settings.emerging_min_observations
+        min_observations = (
+            self.settings.emerging_min_observations
+            if min_observations is None
+            else min_observations
+        )
+        min_rank_improvement = (
+            self.settings.emerging_min_rank_improvement
+            if min_rank_improvement is None
+            else min_rank_improvement
+        )
         if len(observations) < min_observations:
             return False
         recent = observations[-min_observations:]
         rank_gain = recent[0].rank - recent[-1].rank
-        if rank_gain < self.settings.emerging_min_rank_improvement:
+        if rank_gain < min_rank_improvement:
             return False
         if any(later.rank > earlier.rank for earlier, later in zip(recent, recent[1:])):
             return False
@@ -273,6 +288,8 @@ class SignalEngine:
             later.composite_score <= earlier.composite_score
             for earlier, later in zip(recent, recent[1:])
         ):
+            return False
+        if recent[-1].composite_score - recent[0].composite_score < min_composite_gain:
             return False
         return True
 
@@ -295,6 +312,16 @@ class SignalEngine:
             rank=item.rank,
             composite_score=item.composite_score,
         )
+        if (
+            item.rank <= self.settings.entry_ready_top_n
+            and self._is_strengthening_intrabar(
+                ticker,
+                min_observations=self.settings.entry_ready_min_observations,
+                min_rank_improvement=self.settings.entry_ready_min_rank_improvement,
+                min_composite_gain=self.settings.entry_ready_min_composite_gain,
+            )
+        ):
+            return "entry_ready"
         if item.rank <= self.settings.emerging_top_n and self._is_strengthening_intrabar(ticker):
             return "emerging"
         return "watchlist"
@@ -376,6 +403,8 @@ class SignalEngine:
                     minutes=(
                         self.settings.watchlist_cooldown_minutes
                         if signal_kind == "watchlist"
+                        else self.settings.entry_ready_cooldown_minutes
+                        if signal_kind == "entry_ready"
                         else self.settings.emerging_cooldown_minutes
                     )
                 )

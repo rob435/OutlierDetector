@@ -34,3 +34,11 @@
 - Reduced curvature weight to `0.15` and switched momentum to log-return normalization so the leaderboard is less dominated by raw price scale and short-lived curvature spikes.
 - Kept the old boolean dominance flag in SQLite for compatibility, while also storing `dom_state` and `dom_change_pct` for the new tri-state macro logic.
 - Verified the implementation locally with `pytest` and `python3 -m py_compile`.
+- Wrote `SPEC.md` as the canonical current-state specification so the repo now has an explicit contract matching the live implementation rather than an outdated implied brief.
+- Reviewed the next day of Telegram output from `2026-04-04 21:00 UTC` onward and wrote `TELEGRAM_TEST_REPORT_2026-04-05.md`. The short-horizon top-to-bottom flip problem appears dramatically improved, but BTC regime remained flat at `1` all day and several symbols still spanned both top and bottom extremes over the longer window.
+
+## 2026-04-05
+
+- Added a real `entry_ready` signal kind between `emerging` and `confirmed`, with its own tighter intrabar thresholds for earlier tradeable candidates.
+- Kept the implementation honest: the new tier still rides on the existing intrabar lifecycle, but it is now emitted directly by the signal path instead of existing only as wording.
+- Added explicit `ENTRY_READY_*` env knobs so the midpoint tier can be tuned separately from broad `emerging` context without waiting for the 15m close.

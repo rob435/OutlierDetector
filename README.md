@@ -2,6 +2,11 @@
 
 Real-time crypto breakout detector built around Bybit V5 candle streams, volatility-adjusted momentum, return curvature, BTC regime scoring, and cross-sectional ranking.
 
+## Canonical Spec
+
+The current source-of-truth system specification is [SPEC.md](/Users/jhbvdnsbkvnsd/Desktop/OutlierDetector/SPEC.md).
+Use that document for the actual runtime contract. This README is now an operator overview.
+
 ## What it does
 
 - Bootstraps 15m history for a manual universe of midcap USDT contracts plus `BTCUSDT`.
@@ -12,6 +17,7 @@ Real-time crypto breakout detector built around Bybit V5 candle streams, volatil
 - Differentiates intrabar states instead of treating every top-ranked provisional move the same:
   - `WATCHLIST`: ticker enters the broad intrabar leaders
   - `EMERGING`: ticker is strengthening across recent intrabar observations
+  - `ENTRY_READY`: trader-facing midpoint entry tier for the strongest intrabar candidate before the close
   - `CONFIRMED`: ticker qualifies on the closed 15m candle
   - `CONFIRMED_STRONG`: ticker qualifies on the closed 15m candle and has also held confirmed leadership across recent confirmed bars
 - Uses a short settle delay before each processing cycle so ranking runs on a mostly complete 15m snapshot instead of the first symbol that arrives.
@@ -24,10 +30,10 @@ Real-time crypto breakout detector built around Bybit V5 candle streams, volatil
 - Logs the top-ranked names each cycle so you can see the leaders even when no symbol passes the final alert filters.
 - Keeps provisional intrabar prices isolated from the confirmed 15m history so early alerts do not contaminate the close-confirmed signal path.
 
-## Why the implementation differs from the raw spec
+## Current Position
 
-- `EMA200` requires more than 30 daily BTC closes. The system stores 220 BTC daily candles so the regime model is valid.
-- The spec asks for BTC dominance rotation. The current build uses Binance BTCDOM futures history as a practical public proxy, not literal spot market-cap dominance.
+- `EMA200` requires more than 30 daily BTC closes, so the runtime stores 220 BTC daily closes.
+- BTCDOM is implemented through Binance futures history as a practical public proxy, not literal spot market-cap dominance.
 
 ## Next Tuning Pass
 
@@ -96,7 +102,7 @@ Summarize a replay or live SQLite log without hand-writing SQL:
 python report.py --db replay-signals.sqlite3 --top 10
 ```
 
-The report now includes a stage breakdown so you can see how much of the log came from `emerging` versus `confirmed` cycles.
+The report now includes a stage and signal-kind breakdown so you can see how much of the log came from `watchlist`, `emerging`, `entry_ready`, `confirmed`, and `confirmed_strong` activity.
 
 ## Smoke Run
 
@@ -139,6 +145,8 @@ For the first VPS validation run, use [SOAK_RUN.md](/Users/jhbvdnsbkvnsd/Desktop
 - The WebSocket connection will drop eventually. The supervisor reconnects, reboots state through REST, and resumes the stream.
 - Intrabar cycles will fire repeatedly during an open 15m candle whenever Bybit pushes provisional kline updates. That is intentional; alert sends are transition-gated into `WATCHLIST` and `EMERGING` states instead of firing on every pass.
 - `EMERGING` requires strengthening, not just presence. The intrabar state machine looks for repeated watchlist observations with improving rank and rising composite score before promoting a ticker from `WATCHLIST` to `EMERGING`.
+- `ENTRY_READY` is the midpoint signal kind between `EMERGING` and `CONFIRMED`. It is the trader-oriented label for the strongest intrabar candidate and should be read as "this is close enough to trade, but still intrabar."
+- `ENTRY_READY` has explicit tuning knobs in the env templates: `ENTRY_READY_TOP_N`, `ENTRY_READY_COOLDOWN_MINUTES`, `ENTRY_READY_MIN_OBSERVATIONS`, `ENTRY_READY_MIN_RANK_IMPROVEMENT`, and `ENTRY_READY_MIN_COMPOSITE_GAIN`. Use those to keep the midpoint tighter than `EMERGING` without turning it into another close-based filter.
 - `CONFIRMED_STRONG` is not a hard gate. The first valid confirmed bar can still alert as `CONFIRMED`; the signal upgrades to `CONFIRMED_STRONG` when recent confirmed-bar history also supports it.
 - If a candle gap is detected mid-stream, the supervisor falls back to a fresh REST bootstrap instead of pretending state is intact.
 - Cooldown only advances after a successful alert send; a failed Telegram request does not silently suppress the next valid signal.

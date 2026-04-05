@@ -3,7 +3,7 @@
 ## Current
 
 - Core implementation exists.
-- The live engine now supports both intrabar and close-confirmed cycles, with intrabar signals differentiated into `watchlist` and `emerging`, and confirmed signals able to upgrade into `confirmed_strong`.
+- The live engine now supports both intrabar and close-confirmed cycles, with intrabar signals differentiated into `watchlist`, `emerging`, and `entry_ready`, and confirmed signals able to upgrade into `confirmed_strong`.
 - Tests exist for indicator math, gap detection, and signal-engine behavior.
 - Replay tooling exists for recent-candle validation through the production engine path.
 - Universe validation tooling exists for checking the manual symbol list against Bybit’s current instruments.
@@ -26,6 +26,9 @@
 - BTCDOM macro state now comes from Binance futures history on `1h`, using a tri-state `falling / neutral / rising` dominance readout with `+-0.2%` neutral band and compatibility retention for the old boolean dominance field.
 - Momentum now uses log-return normalization and curvature weight has been reduced to `0.15`, which should make the ranking less sensitive to absolute price scale and short-lived curvature spikes.
 - A first 1-day live Telegram review is now documented in `TELEGRAM_TEST_REPORT_2026-04-04.md`; the main validated risk is excessive confirmed-rank churn, with multiple symbols spanning from top 5 to bottom 5 over short windows.
+- `SPEC.md` now exists as the canonical source-of-truth specification for the current runtime behavior.
+- A second Telegram review is now documented in `TELEGRAM_TEST_REPORT_2026-04-05.md`; the immediate top-to-bottom flip problem appears largely fixed in that window, but BTC regime stayed flat at `1` and some symbols still hit both extremes over the full day.
+- The operator surface now exposes `entry_ready` as the midpoint intrabar entry tier, with explicit `ENTRY_READY_*` knobs and report/Telegram wording that distinguishes it from both broad `emerging` context and close-confirmed `confirmed` signals.
 
 ## Remaining risks
 
@@ -35,11 +38,17 @@
 - Intrabar `watchlist` and `emerging` processing are intentionally noisier than the close-confirmed path and still need real-world observation before anyone should trust their alert quality.
 - The confirmed ranking stack appears too reactive for a 3-7 day momentum capture objective. Curvature and hard dominance gating are currently the main suspects.
 - The next tuning pass is now mostly about observing the Binance BTCDOM replacement in live conditions, then deciding whether the dominance adjustment is still too strong or too weak for the 3-7 day momentum objective.
+- BTC regime may now be too low-information to be useful operationally if it continues to stay fixed at `1` across full live windows.
+- Some symbols still span both top and bottom summary extremes over longer live windows, even though the immediate flip problem appears much better than before.
+- `entry_ready` is now a real emitted intrabar signal kind between `emerging` and `confirmed`, with its own tighter rank, cooldown, observation, and composite-gain gates.
 
 ## Next validation steps
 
 - Run the engine on testnet or a compliant mainnet host for 5 to 7 days.
-- Review `watchlist`, `emerging`, `confirmed`, and `confirmed_strong` logged signals for false positives, timing benefit, and missed breakouts before tuning thresholds.
+- Review `watchlist`, `emerging`, `entry_ready`, `confirmed`, and `confirmed_strong` logged signals for false positives, timing benefit, and missed breakouts before tuning thresholds.
 - Reduce confirmed-rank churn by reweighting or clipping curvature, replacing raw-price momentum with percentage/log momentum, and testing whether dominance should modulate instead of hard-blocking.
 - Use the Binance BTCDOM replacement in live conditions, then decide whether the neutral zone and dominance adjustment still need retuning for the 3-7 day momentum objective.
 - Trim or refresh the manual universe against the exact Bybit market you intend to trade.
+- If another live day still shows regime stuck at `1`, revisit the macro regime design before cutting curvature any further.
+- If longer-horizon top/bottom span remains high, tune confirmed stability/persistence before making the ranking math more complex again.
+- Check whether `entry_ready` is selective enough to serve as the primary early-action tier without making `confirmed` feel redundant or late.
