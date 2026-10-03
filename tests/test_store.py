@@ -41,9 +41,9 @@ def test_creates_schema_and_index_with_wal(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(path)
     try:
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(signals)")]
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(alerts)")]
         indexes = conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
-        index_columns = [row[2] for row in conn.execute("PRAGMA index_info(signals_key_time)")]
+        index_columns = [row[2] for row in conn.execute("PRAGMA index_info(alerts_key_time)")]
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     finally:
         conn.close()
@@ -62,7 +62,7 @@ def test_creates_schema_and_index_with_wal(tmp_path: Path) -> None:
         "rvol",
         "level",
     ]
-    assert ("signals_key_time",) in indexes
+    assert ("alerts_key_time",) in indexes
     assert index_columns == ["symbol", "direction", "stage", "detected_at_ms"]
     assert journal_mode == "wal"
 
@@ -148,3 +148,15 @@ def test_context_manager_closes_connection() -> None:
         store.record(BASE)
     with pytest.raises(sqlite3.ProgrammingError):
         store.recent()
+
+
+def test_coexists_with_legacy_signals_table(tmp_path: Path) -> None:
+    path = tmp_path / "signals.sqlite3"
+    with sqlite3.connect(path) as conn:  # the pre-1.0 engine's schema
+        conn.execute("CREATE TABLE signals (timestamp TEXT, ticker TEXT, composite_score REAL)")
+        conn.execute("INSERT INTO signals VALUES ('2026-04-05', 'SOLUSDT', 1.2)")
+    conn.close()
+    with SignalStore(path) as store:
+        store.record(BASE)
+        assert store.last_alerts(since_ms=0)
+        assert len(store.recent()) == 1

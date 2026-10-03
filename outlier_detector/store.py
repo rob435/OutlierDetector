@@ -1,4 +1,8 @@
-"""SQLite persistence of emitted signals (alerts that actually fired, not every scan)."""
+"""SQLite log of fired alerts (not every scan), in table `alerts`.
+
+The pre-1.0 engine wrote an incompatible `signals` table to the same default
+file; using a new table lets both coexist instead of failing on upgrade.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from .models import Direction, Signal, Stage
 LOGGER = logging.getLogger(__name__)
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS signals (
+CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY,
     detected_at_ms INTEGER NOT NULL,
     bar_start_ms INTEGER NOT NULL,
@@ -27,16 +31,16 @@ CREATE TABLE IF NOT EXISTS signals (
     rvol REAL NOT NULL,
     level REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS signals_key_time ON signals (symbol, direction, stage, detected_at_ms);
+CREATE INDEX IF NOT EXISTS alerts_key_time ON alerts (symbol, direction, stage, detected_at_ms);
 """
 
 # Table columns are named after the Signal fields, so the SQL follows the dataclass.
 _COLUMNS = tuple(field.name for field in fields(Signal))
-_INSERT = f"INSERT INTO signals ({', '.join(_COLUMNS)}) VALUES ({', '.join(':' + name for name in _COLUMNS)})"
-_SELECT_RECENT = f"SELECT {', '.join(_COLUMNS)} FROM signals ORDER BY detected_at_ms DESC, id DESC LIMIT ?"
+_INSERT = f"INSERT INTO alerts ({', '.join(_COLUMNS)}) VALUES ({', '.join(':' + name for name in _COLUMNS)})"
+_SELECT_RECENT = f"SELECT {', '.join(_COLUMNS)} FROM alerts ORDER BY detected_at_ms DESC, id DESC LIMIT ?"
 _SELECT_LAST_ALERTS = """
 SELECT symbol, direction, stage, MAX(detected_at_ms)
-FROM signals
+FROM alerts
 WHERE detected_at_ms >= ?
 GROUP BY symbol, direction, stage
 """
