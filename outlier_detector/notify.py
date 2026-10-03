@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import aiohttp
@@ -58,7 +59,8 @@ def format_signal(signal: Signal, *, impulse_minutes: int, lookback_minutes: int
         f"{abs(signal.zscore):.1f}σ · {signal.rvol:.1f}× volume · "
         f"{level_text.format(format_duration(lookback_minutes))} {format_price(signal.level)}"
     )
-    return "\n".join([header, move, stats, _TRADE_URL.format(symbol=signal.symbol)])
+    detected = datetime.fromtimestamp(signal.detected_at_ms / 1000, tz=UTC).strftime("%H:%M:%S UTC")
+    return "\n".join([header, move, stats, f"{detected} · {_TRADE_URL.format(symbol=signal.symbol)}"])
 
 
 class Notifier(Protocol):

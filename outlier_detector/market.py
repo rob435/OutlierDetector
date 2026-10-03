@@ -80,6 +80,10 @@ class MarketData:
     def is_loaded(self, symbol: str) -> bool:
         return self._last_start[self._index[symbol]] != _NOT_LOADED
 
+    def last_closed_ms(self, symbol: str) -> int | None:
+        last = int(self._last_start[self._index[symbol]])
+        return None if last == _NOT_LOADED else last
+
     def closed_count(self, bar_start_ms: int) -> int:
         return int(np.count_nonzero(self._last_start == bar_start_ms))
 
@@ -112,7 +116,7 @@ class MarketData:
         self._clear_live(row)
 
     def apply(self, update: KlineUpdate) -> bool:
-        """Fold a stream update into state. Returns True if anything changed.
+        """Fold a stream update into state. Returns True for a new tick or bar.
 
         Raises GapError when the update skips a bar, i.e. a close was missed.
         """
@@ -121,6 +125,11 @@ class MarketData:
             return False
         candle = update.candle
         last = int(self._last_start[row])
+        if candle.start_ms == last and update.closed:
+            # REST can catch a bar a moment before it is final; the stream's
+            # close is authoritative.
+            self._write_last(row, candle)
+            return False
         if candle.start_ms <= last:
             return False  # late update for a bar we already hold
         expected = last + self.interval_ms
@@ -128,14 +137,9 @@ class MarketData:
             raise GapError(update.symbol, expected, candle.start_ms)
 
         if update.closed:
-            for column, value in (
-                (self._close, candle.close),
-                (self._high, candle.high),
-                (self._low, candle.low),
-                (self._turnover, candle.turnover),
-            ):
+            for column in (self._close, self._high, self._low, self._turnover):
                 column[row, :-1] = column[row, 1:]
-                column[row, -1] = value
+            self._write_last(row, candle)
             self._last_start[row] = candle.start_ms
             self._clear_live(row)
         else:
@@ -182,6 +186,12 @@ class MarketData:
             price=np.where(ticked, self._live_close[rows], self._close[rows, -1]),
             bar_turnover=np.where(ticked, self._live_turnover[rows], 0.0),
         )
+
+    def _write_last(self, row: int, candle: Candle) -> None:
+        self._close[row, -1] = candle.close
+        self._high[row, -1] = candle.high
+        self._low[row, -1] = candle.low
+        self._turnover[row, -1] = candle.turnover
 
     def _clear_live(self, row: int) -> None:
         self._live_start[row] = _NOT_LOADED

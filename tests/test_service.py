@@ -24,13 +24,26 @@ class FakeExchange:
         self.history = {s: make_candles(random_walk(BARS, seed=i).tolist()) for i, s in enumerate(SYMBOLS)}
         self.updates: asyncio.Queue[KlineUpdate | Exception] = asyncio.Queue()
         self.fetches: list[str] = []
+        self.fetch_delay = 0.0
+        self.fail_once: set[str] = set()
 
     async def resolve_universe(self, symbols: Sequence[str], size: int, min_turnover_usd: float) -> list[str]:
         return list(self.history)
 
     async def fetch_candles(self, symbol: str, interval_minutes: int, count: int) -> list[Candle]:
         self.fetches.append(symbol)
+        await asyncio.sleep(self.fetch_delay)
+        if symbol in self.fail_once:
+            self.fail_once.discard(symbol)
+            raise RuntimeError("temporary outage")
         return self.history[symbol][-count:]
+
+    def advance_rest(self, symbol: str, *, breakout: bool = False) -> None:
+        """REST gains bar B1 for `symbol` (optionally a breakout) that the stream never delivered."""
+        candles = self.history[symbol]
+        close = self.breakout_price(symbol) if breakout else candles[-1].close
+        turnover = 5e6 if breakout else 1e6
+        candles.append(Candle(candles[-1].start_ms + INTERVAL_MS, close, close, close, turnover))
 
     async def stream(
         self, symbols: Sequence[str], interval_minutes: int, *, stale_seconds: float
@@ -167,3 +180,44 @@ async def test_restart_restores_cooldowns() -> None:
     store.record(signal)
     service = Service(SETTINGS, FakeExchange(), store, Recorder(), clock=Clock(now))  # type: ignore[arg-type]
     assert not service.gate.allow(replace(signal, detected_at_ms=now))
+
+
+async def test_barrier_waits_for_resync_and_scans_the_resynced_bar(harness: Harness) -> None:
+    h = harness
+    h.clock.ms = B2 + 1_000
+    h.exchange.fetch_delay = 0.2
+    h.exchange.advance_rest("S5USDT", breakout=True)
+    h.exchange.push("S5USDT", B2, 100.0, closed=False)  # S5's B1 close was lost: resync
+    h.exchange.push_bar(B1, closed=True, skip=["S5USDT"])
+    await wait_until(lambda: h.recorder.find("S5USDT breakout · confirmed"))
+    assert h.service.market.closed_count(B1) == len(SYMBOLS)
+
+
+async def test_close_missed_by_everyone_is_scanned_after_resync(harness: Harness) -> None:
+    h = harness
+    h.clock.ms = B2 + 1_000
+    for symbol in SYMBOLS:
+        h.exchange.advance_rest(symbol, breakout=symbol == "S0USDT")
+        h.exchange.push(symbol, B2, 100.0, closed=False)  # subscribed just after the close
+    await wait_until(lambda: h.recorder.find("S0USDT breakout · confirmed"))
+
+
+async def test_confirmed_scan_needs_a_representative_universe(harness: Harness) -> None:
+    h = harness
+    h.service.settings = Settings(scan_interval_seconds=0.01, close_grace_seconds=0.05)
+    h.clock.ms = B2 + 1_000
+    h.exchange.push("S0USDT", B1, h.exchange.breakout_price("S0USDT"), turnover=5e6, closed=True)
+    await asyncio.sleep(0.3)
+    assert not h.recorder.find("confirmed")
+
+
+async def test_failed_bootstrap_symbols_are_retried() -> None:
+    exchange = FakeExchange()
+    exchange.fail_once = {"S3USDT"}
+    service = Service(SETTINGS, exchange, SignalStore(":memory:"), Recorder())  # type: ignore[arg-type]
+    task = asyncio.create_task(service.run_session())
+    await wait_until(lambda: service.market is not None and service.market.is_loaded("S3USDT"))
+    assert exchange.fetches.count("S3USDT") == 2
+    exchange.updates.put_nowait(ConnectionError("test over"))
+    with pytest.raises(ConnectionError):
+        await task

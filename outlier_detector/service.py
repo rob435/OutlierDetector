@@ -26,7 +26,7 @@ from typing import Any
 from .bybit import BybitClient
 from .config import Settings
 from .detector import CooldownGate, compute_features, detect, find_breakouts, top_movers
-from .market import GapError, MarketData
+from .market import GapError, MarketData, Snapshot
 from .models import Direction, KlineUpdate, Signal, Stage
 from .notify import AlertDispatcher, format_duration, format_signal
 from .store import SignalStore
@@ -60,6 +60,7 @@ class Service:
         # Per-session state, reset by _start_session().
         self.market: MarketData | None = None
         self._tasks: set[asyncio.Task[None]] = set()
+        self._resyncing: set[str] = set()
         self._dirty = False
         self._last_scanned_close = 0
         self._closing_bar: int | None = None
@@ -88,7 +89,7 @@ class Service:
     async def run_session(self) -> None:
         s = self.settings
         symbols = await self.client.resolve_universe(s.symbols, s.universe_size, s.min_turnover_usd)
-        market = await self._bootstrap(symbols)
+        market, failed = await self._bootstrap(symbols)
         self._start_session(market)
         if not self._announced:
             self._announced = True
@@ -97,6 +98,8 @@ class Service:
                 f"{format_duration(s.interval_minutes)} bars"
             )
         try:
+            for symbol in failed:
+                self._start_resync(symbol)
             if s.early_alerts:
                 self._spawn(self._scan_loop())
             async for update in self.client.stream(
@@ -115,8 +118,7 @@ class Service:
             changed = market.apply(update)
         except GapError as exc:
             LOGGER.warning("%s; resyncing from REST", exc)
-            market.invalidate(update.symbol)
-            self._spawn(self._resync(market, update.symbol))
+            self._start_resync(update.symbol)
             return
         if not changed:
             return
@@ -127,14 +129,21 @@ class Service:
     def _on_bar_closed(self, bar: int) -> None:
         if bar <= self._last_scanned_close:
             return  # straggler for a bar that has already been scanned
-        market = self._require_market()
         if self._closing_bar is None:
             self._closing_bar = bar
             self._closing_since = time.monotonic()
             self._bar_closed.clear()
             self._spawn(self._close_scan(bar))
-        # Done once no in-sync symbol is still waiting on this bar's close.
-        if bar == self._closing_bar and market.closed_count(bar - market.interval_ms) == 0:
+        self._check_barrier()
+
+    def _check_barrier(self) -> None:
+        """Release the close scan once no symbol can still deliver the closing bar."""
+        market = self._require_market()
+        if (
+            self._closing_bar is not None
+            and not self._resyncing
+            and market.closed_count(self._closing_bar - market.interval_ms) == 0
+        ):
             self._bar_closed.set()
 
     # -- scans -----------------------------------------------------------
@@ -160,7 +169,7 @@ class Service:
         snap = market.snapshot_live(bar, (now - bar) / market.interval_ms)
         # Mid close-wave only part of the universe has rolled over; wait for a
         # representative cross-section rather than score a sliver of it.
-        if snap is None or len(snap) * 2 < market.loaded_count:
+        if snap is None or not _representative(snap, market):
             return
         for signal in detect(snap, self.settings, Stage.EARLY, now):
             self._emit(signal)
@@ -175,7 +184,14 @@ class Service:
     def scan_closed(self, bar: int, waited: float = 0.0) -> None:
         market = self._require_market()
         snap = market.snapshot_closed(bar)
-        if snap is None:
+        if snap is None or not _representative(snap, market):
+            LOGGER.warning(
+                "Bar %s: only %d/%d symbols closed after %.1fs; skipping confirmed scan",
+                _utc(bar),
+                0 if snap is None else len(snap),
+                market.loaded_count,
+                waited,
+            )
             return
         features = compute_features(snap, self.settings)
         signals = find_breakouts(snap, features, self.settings, Stage.CONFIRMED, self._now_ms())
@@ -197,8 +213,7 @@ class Service:
         # A symbol that missed an entire close is stuck; reload it.
         for symbol in market.lagging(bar - market.interval_ms):
             LOGGER.warning("%s missed the %s close; resyncing from REST", symbol, _utc(bar))
-            market.invalidate(symbol)
-            self._spawn(self._resync(market, symbol))
+            self._start_resync(symbol)
 
     def _emit(self, signal: Signal) -> None:
         if not self.gate.allow(signal):
@@ -223,7 +238,8 @@ class Service:
 
     # -- REST ------------------------------------------------------------
 
-    async def _bootstrap(self, symbols: list[str]) -> MarketData:
+    async def _bootstrap(self, symbols: list[str]) -> tuple[MarketData, list[str]]:
+        """Load every symbol's history; returns the market and the symbols that failed."""
         s = self.settings
         semaphore = asyncio.Semaphore(s.bootstrap_concurrency)
 
@@ -234,20 +250,30 @@ class Service:
         LOGGER.info("Bootstrapping %d symbols", len(symbols))
         results = await asyncio.gather(*(fetch(symbol) for symbol in symbols), return_exceptions=True)
         history = {}
+        failed = []
         for symbol, result in zip(symbols, results, strict=True):
             if isinstance(result, Exception):
-                LOGGER.warning("Skipping %s: %s", symbol, result)
+                LOGGER.warning("Bootstrap of %s failed (%s); will keep retrying", symbol, result)
+                failed.append(symbol)
             elif isinstance(result, BaseException):
                 raise result
             else:
                 history[symbol] = result
         if len(history) < 2:
             raise RuntimeError(f"bootstrap loaded only {len(history)} symbol(s)")
-        market = MarketData(list(history), s.history_bars, s.interval_ms)
+        # Failed symbols stay in the universe unloaded, and are retried in the background.
+        market = MarketData(symbols, s.history_bars, s.interval_ms)
         for symbol, candles in history.items():
             market.load(symbol, candles)
-        LOGGER.info("Bootstrap complete: %d symbols", len(history))
-        return market
+        LOGGER.info("Bootstrap complete: %d/%d symbols", len(history), len(symbols))
+        return market, failed
+
+    def _start_resync(self, symbol: str) -> None:
+        market = self._require_market()
+        market.invalidate(symbol)
+        if symbol not in self._resyncing:
+            self._resyncing.add(symbol)
+            self._spawn(self._resync(market, symbol))
 
     async def _resync(self, market: MarketData, symbol: str) -> None:
         s = self.settings
@@ -256,20 +282,28 @@ class Service:
             try:
                 candles = await self.client.fetch_candles(symbol, s.interval_minutes, s.history_bars + 1)
                 market.load(symbol, candles)
-                LOGGER.info("Resynced %s", symbol)
-                return
+                break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 LOGGER.warning("Resync of %s failed (%s); retrying in %.0fs", symbol, exc, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, MAX_BACKOFF_SECONDS)
+        LOGGER.info("Resynced %s", symbol)
+        self._resyncing.discard(symbol)
+        # REST may hold a close the stream never delivered (e.g. a gap at a bar
+        # boundary): treat it as that close so the bar still gets scanned.
+        last_closed = market.last_closed_ms(symbol)
+        if last_closed is not None:
+            self._on_bar_closed(last_closed)
+        self._check_barrier()
 
     # -- plumbing --------------------------------------------------------
 
     def _start_session(self, market: MarketData) -> None:
         self.market = market
         self._dirty = False
+        self._resyncing = set()
         self._closing_bar = None
         self._bar_closed = asyncio.Event()
         # Never alert on a bar that closed before this session started.
@@ -298,6 +332,11 @@ class Service:
 
     def _now_ms(self) -> int:
         return int(self._clock() * 1000)
+
+
+def _representative(snap: Snapshot, market: MarketData) -> bool:
+    """At least half the loaded universe is in the snapshot."""
+    return len(snap) * 2 >= market.loaded_count
 
 
 def _utc(ms: int) -> str:

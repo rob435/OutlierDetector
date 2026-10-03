@@ -67,7 +67,7 @@ async def fetch_history(client: BybitClient, settings: Settings, days: float) ->
 
     async def fetch(symbol: str) -> list[Candle]:
         async with semaphore:
-            return await client.fetch_candles(symbol, settings.interval_minutes, count)
+            return await client.fetch_candles(symbol, settings.interval_minutes, count + 1)
 
     LOGGER.info("Fetching %d bars for %d symbols", count, len(symbols))
     results = await asyncio.gather(*(fetch(symbol) for symbol in symbols), return_exceptions=True)

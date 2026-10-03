@@ -108,3 +108,13 @@ def test_close_clears_live_tick() -> None:
     snap = market.snapshot_live((HISTORY + 4) * INTERVAL_MS, elapsed=0.1)
     assert snap is not None
     assert snap.price[0] == 140.0 and snap.bar_turnover[0] == 0.0
+
+
+def test_stream_close_overrides_rest_copy_of_the_same_bar() -> None:
+    market = loaded_market()
+    last = (HISTORY + 2) * INTERVAL_MS
+    assert not market.apply(KlineUpdate("AAAUSDT", Candle(last, 111, 99, 110, 42), closed=True))
+    snap = market.snapshot_closed(last)
+    assert snap is not None
+    assert snap.price[0] == 110 and snap.bar_turnover[0] == 42 and snap.high[0, -1] == 105 * 1.001
+    assert market.last_closed_ms("AAAUSDT") == last

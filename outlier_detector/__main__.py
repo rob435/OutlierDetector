@@ -32,7 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("run", help="stream Bybit live and alert on breakouts (default)")
     replay = commands.add_parser("replay", help="run recent history through the detector (closed bars)")
-    replay.add_argument("--days", type=float, default=3.0, help="days of history to replay (default: 3)")
+    replay.add_argument("--days", type=_positive, default=3.0, help="days of history to replay (default: 3)")
     history = commands.add_parser("signals", help="list recent alerts from the database")
     history.add_argument("--limit", type=int, default=20)
     args = parser.parse_args(argv)
@@ -55,6 +55,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(format_row(row))
         return 0
     return asyncio.run(_run(settings))
+
+
+def _positive(text: str) -> float:
+    value = float(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return value
 
 
 async def _run(settings: Settings) -> int:

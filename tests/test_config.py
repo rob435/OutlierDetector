@@ -53,7 +53,9 @@ def test_from_env_rejects_unparseable_values(key: str, value: str) -> None:
         {"impulse_bars": 200},
         {"min_zscore": 0},
         {"min_elapsed_fraction": 0},
-        {"close_grace_seconds": 900},
+        {"close_grace_seconds": 0},
+        {"close_grace_seconds": 451},
+        {"cooldown_minutes": 14},
         {"log_level": "LOUD"},
     ],
 )

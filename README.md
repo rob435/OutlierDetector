@@ -8,7 +8,7 @@ It streams 15-minute klines for the most-traded perps and re-scores the whole un
 ▲ SOLUSDT breakout · early
 152.340  +3.20% in 1h (market +0.40%)
 4.1σ · 5.3× volume · above 24h high 150.100
-https://www.bybit.com/trade/usdt/SOLUSDT
+14:32:05 UTC · https://www.bybit.com/trade/usdt/SOLUSDT
 ```
 
 ## What counts as a breakout
@@ -48,7 +48,7 @@ Bybit WS kline.15.* ───────────────► MarketData 
 
 Robustness built in:
 
-- **Bootstrap**: closed bars are identified with Bybit's server time, never the local clock. Symbols that can't load (e.g. new listings) are skipped instead of failing startup.
+- **Bootstrap**: closed bars are identified with Bybit's server time, never the local clock. A symbol that fails to load (e.g. a new listing) is retried in the background instead of failing startup.
 - **Stream**: subscriptions are chunked and each acknowledgement is checked. The client sends Bybit's app-level ping, and a watchdog reconnects if the stream goes quiet.
 - **Gaps**: a missed bar re-loads only that symbol from REST, so one hiccup doesn't rebuild the whole universe.
 - **Bar close**: the confirmed scan runs as soon as every in-sync symbol has closed, with a grace timeout. It never ranks a half-updated universe.

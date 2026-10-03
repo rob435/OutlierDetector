@@ -84,7 +84,7 @@ def test_format_signal_breakout() -> None:
         "▲ SOLUSDT breakout · early\n"
         "152.340  +3.20% in 1h (market +0.40%)\n"
         "4.1σ · 5.3× volume · above 24h high 150.100\n"
-        "https://www.bybit.com/trade/usdt/SOLUSDT"
+        "22:15:00 UTC · https://www.bybit.com/trade/usdt/SOLUSDT"
     )
 
 
@@ -107,7 +107,7 @@ def test_format_signal_held_breakdown() -> None:
         "▼ WIFUSDT breakdown · confirmed (held into close)\n"
         "1.23400  -4.10% in 1h (market -0.20%)\n"
         "3.6σ · 2.1× volume · below 24h low 1.29000\n"
-        "https://www.bybit.com/trade/usdt/WIFUSDT"
+        "22:15:00 UTC · https://www.bybit.com/trade/usdt/WIFUSDT"
     )
 
 

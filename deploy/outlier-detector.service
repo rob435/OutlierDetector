@@ -12,7 +12,7 @@ EnvironmentFile=/opt/outlier-detector/.env
 ExecStart=/opt/outlier-detector/.venv/bin/outlier-detector run
 Restart=always
 RestartSec=5
-TimeoutStopSec=15
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

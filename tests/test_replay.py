@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from support import make_candles, random_walk
+from support import INTERVAL_MS, make_candles, random_walk
 
 from outlier_detector.config import Settings
 from outlier_detector.models import Candle, Direction, Stage
-from outlier_detector.replay import replay_history, summarize
+from outlier_detector.replay import fetch_history, replay_history, summarize
 
 SETTINGS = Settings(cooldown_minutes=60)
 BARS = SETTINGS.history_bars + 1 + 20
@@ -53,3 +53,22 @@ def test_summarize() -> None:
     text = summarize(replay_history(history(), SETTINGS), 2)
     assert text.startswith("1 breakouts over 2 days (0.5/day): 1 up, 0 down.")
     assert "S0USDT (1)" in text
+
+
+async def test_fetch_history_aligns_symbols_fetched_across_a_bar_close() -> None:
+    days = 1
+    count = SETTINGS.history_bars + 1 + 96 * days
+
+    class Client:
+        async def resolve_universe(self, symbols, size, min_turnover_usd):
+            return [f"S{i}USDT" for i in range(6)]
+
+        async def fetch_candles(self, symbol, interval_minutes, wanted):
+            # The last three symbols are fetched after the next bar has closed.
+            late = int(symbol[1]) >= 3
+            return make_candles(random_walk(wanted, seed=1).tolist(), start_ms=INTERVAL_MS * late)
+
+    history = await fetch_history(Client(), SETTINGS, days)  # type: ignore[arg-type]
+    assert len(history) == 6
+    assert {len(candles) for candles in history.values()} == {count}
+    assert len({candles[-1].start_ms for candles in history.values()}) == 1
