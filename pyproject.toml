@@ -1,22 +1,41 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "outlier-detector"
-version = "0.1.0"
-description = "Real-time crypto signal detection system for volatility-adjusted breakout detection."
-requires-python = ">=3.10"
+version = "1.0.0"
+description = "Real-time breakout detector for Bybit USDT perpetuals."
+readme = "README.md"
+requires-python = ">=3.11"
 dependencies = [
-    "aiohttp>=3.11,<4.0",
-    "certifi>=2024.0.0",
-    "numpy>=2.1,<3.0",
+    "aiohttp>=3.9,<4",
+    "numpy>=1.26,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3,<9.0",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
 ]
+
+[project.scripts]
+outlier-detector = "outlier_detector.__main__:main"
+
+[tool.setuptools]
+packages = ["outlier_detector"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]

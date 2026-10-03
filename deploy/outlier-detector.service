@@ -1,5 +1,7 @@
+# Install: copy to /etc/systemd/system/, adjust paths, then
+#   systemctl daemon-reload && systemctl enable --now outlier-detector
 [Unit]
-Description=Outlier Detector Signal Engine
+Description=Outlier Detector (Bybit breakout alerts)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,11 +9,10 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/outlier-detector
 EnvironmentFile=/opt/outlier-detector/.env
-ExecStart=/opt/outlier-detector/.venv/bin/python /opt/outlier-detector/main.py
+ExecStart=/opt/outlier-detector/.venv/bin/outlier-detector run
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target
-
